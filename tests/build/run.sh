@@ -212,6 +212,163 @@ case_default_path_builds() {
   [[ -z $status ]] || fail "git status is not empty: $status"
 }
 
+# Runs the checkout's tools/framework.sh, capturing stdout and stderr in $OUT and the exit code in $RC.
+fw_sh() {
+  OUT=$(bash tools/framework.sh "$@" 2>&1) && RC=0 || RC=$?
+}
+
+expect_eq() {
+  [[ $1 == "$2" ]] || fail "$3: expected '$2', got '$1'"
+}
+
+# A stand-in framework clone beside a stand-in doment repository, synced to the clone's first commit.
+synced_setup() {
+  C1=$(new_framework_repo "$T/darkraise-framework")
+  new_doment_repo "$T/doment" "$C1"
+  cd "$T/doment"
+  fw_sh sync
+  expect_rc 0
+  WT=$T/doment/external/darkraise-framework
+}
+
+framework_commit() {
+  local dir=$1 file=$2
+  echo "$file" > "$dir/$file"
+  git -C "$dir" add "$file"
+  git -C "$dir" commit -qm "Add $file"
+  git -C "$dir" rev-parse HEAD
+}
+
+CASES+=(sync_creates)
+case_sync_creates() {
+  synced_setup
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$C1" "worktree HEAD"
+  if git -C "$WT" symbolic-ref -q HEAD >/dev/null; then
+    fail "worktree HEAD is not detached"
+  fi
+  dn build src/App
+  expect_rc 0
+}
+
+CASES+=(sync_moves_clean)
+case_sync_moves_clean() {
+  synced_setup
+  local c2
+  c2=$(framework_commit "$T/darkraise-framework" c2.txt)
+  echo "$c2" > build/darkraise-framework.pin
+  fw_sh sync
+  expect_rc 0
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$c2" "worktree HEAD after the move"
+  expect_eq "$(git -C "$T/darkraise-framework" rev-parse refs/heads/master)" "$c2" "framework master"
+  git -C "$WT" switch -q -c feature
+  echo "$C1" > build/darkraise-framework.pin
+  fw_sh sync
+  expect_rc 0
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$C1" "worktree HEAD after leaving feature"
+  if git -C "$WT" symbolic-ref -q HEAD >/dev/null; then
+    fail "worktree HEAD is not detached after leaving feature"
+  fi
+  expect_eq "$(git -C "$WT" rev-parse refs/heads/feature)" "$c2" "feature branch"
+}
+
+CASES+=(sync_refuses)
+case_sync_refuses() {
+  synced_setup
+  local c2
+  c2=$(framework_commit "$T/darkraise-framework" c2.txt)
+  echo "$c2" > build/darkraise-framework.pin
+
+  echo changed >> "$WT/src/Darkraise/Class1.cs"
+  fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: $WT is not clean \(first: src/Darkraise/Class1.cs\)$"
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$C1" "HEAD after refusing a modified file"
+  grep -q '^changed$' "$WT/src/Darkraise/Class1.cs" || fail "the modified file was reverted"
+  git -C "$WT" checkout -q -- src/Darkraise/Class1.cs
+
+  mkdir -p "$WT/docs/dforge"
+  echo note > "$WT/docs/dforge/note.md"
+  fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: $WT is not clean \(first: docs/dforge/\)$"
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$C1" "HEAD after refusing an ignored file"
+  [[ -f $WT/docs/dforge/note.md ]] || fail "the ignored file was removed"
+  rm -rf "$WT/docs"
+
+  mkdir -p "$WT/src/Darkraise/obj"
+  echo x > "$WT/src/Darkraise/obj/x"
+  fw_sh sync
+  expect_rc 0
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$c2" "HEAD with only build output present"
+
+  local stray
+  stray=$(framework_commit "$WT" stray.txt)
+  echo "$C1" > build/darkraise-framework.pin
+  fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: $WT HEAD [0-9a-f]{40} is on no framework branch or remote-tracking ref$"
+  expect_out "HEAD $stray "
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$stray" "HEAD after refusing an unreachable commit"
+  [[ -f $WT/stray.txt ]] || fail "the stray commit's file is gone"
+
+  local doment_head
+  doment_head=$(git rev-parse HEAD)
+  DARKRAISE_FRAMEWORK_PATH=$T/doment/src fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: $T/doment/src exists but is not a git worktree$"
+  expect_eq "$(git rev-parse HEAD)" "$doment_head" "doment HEAD after refusing a plain directory"
+  git symbolic-ref -q HEAD >/dev/null || fail "doment HEAD was detached"
+
+  DARKRAISE_FRAMEWORK_PATH=$T/darkraise-framework fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: $T/darkraise-framework is the framework's primary checkout, not a worktree of it$"
+  expect_eq "$(git -C "$T/darkraise-framework" branch --show-current)" master "framework primary checkout branch"
+}
+
+CASES+=(sync_fetches)
+case_sync_fetches() {
+  local c1 c3
+  c1=$(new_framework_repo "$T/source")
+  git clone -q "$T/source.origin.git" "$T/darkraise-framework"
+  git clone -q "$T/source.origin.git" "$T/other"
+  c3=$(framework_commit "$T/other" c3.txt)
+  git -C "$T/other" push -q origin master
+  new_doment_repo "$T/doment" "$c3"
+  cd "$T/doment"
+  fw_sh sync
+  expect_rc 0
+  expect_eq "$(git -C external/darkraise-framework rev-parse HEAD)" "$c3" "worktree HEAD"
+  [[ $c1 != "$c3" ]] || fail "the fetched commit is the first commit"
+}
+
+CASES+=(sync_no_clone)
+case_sync_no_clone() {
+  new_doment_repo "$T/doment" 0000000000000000000000000000000000000000
+  cd "$T/doment"
+  DARKRAISE_FRAMEWORK_REPO=$T/none fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: no darkraise-framework clone at $T/none or $T/darkraise-framework$"
+  [[ ! -e external/darkraise-framework ]] || fail "a framework worktree was created"
+}
+
+CASES+=(sync_linked_worktree)
+case_sync_linked_worktree() {
+  synced_setup
+  git -C "$T/doment" worktree add -q -b linked "$T/doment-wt"
+  cd "$T/doment-wt"
+  fw_sh sync
+  expect_rc 0
+  [[ -d $T/doment-wt/external/darkraise-framework ]] || fail "no framework worktree in the linked checkout"
+  expect_eq "$(git -C "$T/doment-wt/external/darkraise-framework" rev-parse --show-toplevel)" \
+    "$T/doment-wt/external/darkraise-framework" "linked checkout's framework worktree"
+  expect_eq "$(git -C "$T/doment-wt/external/darkraise-framework" rev-parse HEAD)" "$C1" "linked worktree HEAD"
+  dn build src/App
+  expect_rc 0
+  cd "$T/doment"
+  dn build src/App
+  expect_rc 0
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 
