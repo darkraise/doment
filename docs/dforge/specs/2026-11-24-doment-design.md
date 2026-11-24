@@ -38,9 +38,10 @@ The first user is the owner, on the owner's own machines and those of people the
 
 ## 3. Success measures
 
-Numbers are proposals for the owner to edit. All are measured by the harness built in M1. SM6 and the transport share of
-the latency budget are first proven on Linux (M2 to M4); every measure that involves pixels is measured from M7 on the
-owner's Windows hardware.
+The owner approved these numbers with the spec on 2026-11-24; changing one is a spec change. Latency and frame delivery
+are measured by the harness built in M1; the sharpness measurement is added to it in M9; SM8 is a build check and SM9 is
+an owner sign-off. SM6 and the transport share of the latency budget are first proven on Linux (M2 to M4); every measure
+that involves pixels is measured from M7 on the owner's Windows hardware.
 
 - **SM1 Wired LAN.** 1440p at 120 Hz from an NVIDIA host to an Intel, an AMD and an NVIDIA client: added latency from
   host frame capture to client present is at most 16 ms at p50 and 33 ms at p99, and at least 99% of frames arrive on
@@ -53,7 +54,7 @@ owner's Windows hardware.
 - **SM5 Connecting.** From choosing a paired device to the first frame takes at most 2 seconds on the LAN and 4 seconds
   over the internet; choosing a sleeping device wakes it and connects in one action.
 - **SM6 Terminals.** A terminal session survives 24 hours with no client attached; reattaching shows the current screen
-  within 1 second; the reliability matrix loses no session.
+  within 1 second.
 - **SM7 Gaming.** With a stream active the host game's frame rate is at least 95% of its rate without doment; a
   controller with rumble works in an XInput game.
 - **SM8 First-party.** No code ships outside doment, darkraise-framework, .NET, operating-system APIs and GPU-driver
@@ -62,12 +63,12 @@ owner's Windows hardware.
 
 ## 4. Non-goals
 
-Chosen by the owner:
+Chosen by the owner in the discovery interview:
 
 - **Enterprise fleet features**: mass deployment through MSI or Group Policy, technician role hierarchies, SIEM export,
   compliance session recording. A per-device permission list and a local audit log are in scope.
 
-Proposed by this spec, for the owner to confirm:
+Proposed by this spec and approved by the owner with it on 2026-11-24:
 
 - Circumventing protected content (DRM video stays black) or anti-cheat systems that reject injected input.
 - Phones and tablets as hosts (they are clients only).
@@ -87,7 +88,7 @@ billing, a browser client, and shared sessions with guests. Each would enter as 
 - **Platform order:** for screen streaming, Windows is the first host and client. The Linux headless agent (terminals,
   wake helper, relay node) is part of 1.0 because it is built in the Linux phase. Then Android, Linux desktop and Steam
   Deck, macOS and iOS clients, and macOS and Linux desktop hosts. The portable core compiles for all of them from M1.
-- **Windows floor (proposed):** Windows 11 x64 for host and client in 1.0. The framework is designed and tested on
+- **Windows floor:** Windows 11 x64 for host and client in 1.0. The framework is designed and tested on
   Windows 11, and Windows 10 is past its end of support.
 - **Third-party rule:** first-party by default. A third-party component is allowed only as a named exception approved in
   this spec, with a reason, an interface around it and a replacement plan (section 11). GPU encoder interfaces (NVENC,
@@ -105,7 +106,7 @@ billing, a browser client, and shared sessions with guests. Each would enter as 
 
 ## 6. Requirements
 
-Each requirement is a statement a test or a demonstration can check, and belongs to exactly one epic (the bold line above it). Numbers in success measures and requirements are proposals until the owner approves this spec.
+Each requirement is a statement a test or a demonstration can check, and belongs to exactly one epic (the bold line above it). The owner approved the numbers in the success measures and requirements with this spec on 2026-11-24.
 
 ### M1 Foundations
 
@@ -238,7 +239,7 @@ Each requirement is a statement a test or a demonstration can check, and belongs
 
 - **R54** A portable terminal model parses the VT and xterm behaviour the conformance list needs (24-bit colour, mouse modes, bracketed paste, alternate screen, wide and combining Unicode, synchronized output) and holds the screen and scrollback, with no dependence on any UI.
 - **R55** Output split in the middle of a UTF-8 character or an escape sequence is handled correctly, and the parser is fuzzed.
-- **R56** A conformance suite runs the model against bash, vim, tmux and Claude Code output.
+- **R56** The model passes a conformance suite built from bash, vim, tmux and Claude Code output.
 
 **Command-line terminal client**
 
@@ -494,7 +495,7 @@ Each requirement is a statement a test or a demonstration can check, and belongs
 
 **Permissions, consent and audit**
 
-- **R153** Capabilities (view, control, clipboard, files, terminal, power, elevation) are granted per device and revoked in effect within seconds for live sessions.
+- **R153** Capabilities (view, control, clipboard, files, terminal, power, elevation) are granted per device and revoked in effect within 5 seconds for live sessions.
 - **R154** In attended mode the local user sees who is asking and which capabilities are requested, and accepts or refuses; unattended mode is switched on per device by a local administrator.
 - **R155** A persistent on-screen indicator and a one-click 'end session' are shown to the local user during every session.
 - **R156** The host keeps a local audit log of connections, capabilities used, transferred file names and hashes, and elevation, readable by the owner.
@@ -702,7 +703,7 @@ Each row is a documented failure from the research and the epic that answers it.
 | Headless hosts need a dummy plug; virtual display drivers conflict or their signatures expire | all | Per-session virtual display behind an interface, layout restored after a crash (Virtual display and resolution matching), expiry warning (First-party virtual display driver) |
 | Test certificate added to the trusted root store to load a driver | RustDesk | No trust anchor is ever added (Host service and session agent) |
 | Gamepad support depends on an abandoned or paid driver | Sunshine, Apollo | Driver behind an interface now, first-party driver later (Game controllers, First-party virtual gamepad driver) |
-| Stutter with no way to find the cause | all | Per-stage timestamps and a latency gate from M1 (Measurement harness, Statistics and diagnostics) |
+| Stutter with no way to find the cause | all | Per-stage timestamps from M1 and a latency gate on real hardware from M7 (Measurement harness, Statistics and diagnostics) |
 | Keyframe storms and bitrate overshoot after packet loss | GameStream lineage | Error correction with reference invalidation, bounded frame size (Media transport, Hardware and fallback encoders) |
 | Wrong keys on non-US layouts, stuck modifiers | Moonlight, RustDesk | Scancode plus Unicode paths and a layout test suite (Keyboard and mouse input, Keyboard fidelity) |
 | Weak pairing; client-reported identity; several access paths with different checks | Moonlight PIN, RustDesk, TeamViewer 2026 | Pinned device keys, guess-resistant pairing, one policy decision point (Device identity, pairing and encrypted sessions) |
@@ -742,13 +743,12 @@ Known so far; each open decision is settled inside its epic through dforge:selec
   render with a new Win32UI terminal control. Terminals are text, not pixels.
 - **Real-time discipline.** Dedicated threads with multimedia scheduling, no allocations on the steady-state media path,
   high-resolution timers.
-- **Framework contributions.** The video surface control, the terminal control and, if the owner agrees, the audio codec
-  go into darkraise-framework. The framework's own media programme is software-only and schedules Opus for its M11 and
+- **Framework contributions.** The video surface control, the terminal control and the audio codec go into
+  darkraise-framework. The framework's own media programme is software-only and schedules Opus for its M11 and
   M12; doment needs a low-latency audio codec sooner, so the two plans must be reconciled in that epic.
 
-Open decisions: the 4:4:4 technique for AMD clients; vendor encoder interfaces versus Direct3D 12 video encode as the
-primary path; first-party CELT codec versus naming an Opus implementation as an exception; how doment references the
-framework; the UI stack for mobile, Linux and macOS clients (Win32UI is Windows-only).
+Open decisions: the 4:4:4 technique for AMD clients; whether Direct3D 12 video encode is added as a vendor-neutral path
+beside the NVENC and Quick Sync interfaces the requirements commit to; how doment references the framework; the UI stack for mobile, Linux and macOS clients (Win32UI is Windows-only).
 
 ## 11. Third-party exception register (initial)
 
@@ -784,6 +784,11 @@ Nothing else is excepted. Adding an entry needs the owner's approval.
   royalties is unverified. It does not matter for private use and needs legal advice before any public release.
 - **Research gaps.** Reddit could not be read by the research tools, and each research file lists items it could not
   verify (for example Parsec's current codec list and several 2026 CVE identifiers).
+- **Requirements without a threshold.** The M0 audit found requirements whose wording has no pass threshold: "without
+  collapse" (WAN adaptation), "no bitrate spike" (Screen capture), "presentation is even" (Frame pacing and game
+  performance), "a full fuzzing campaign" (Security review), "every failure the user can meet" (Errors and
+  observability), documentation "complete", and "usable with the controller alone" (Steam Deck mode). Each epic's own
+  spec must set the threshold before its plan is written.
 - **Accessibility.** Win32UI has no screen-reader support, so doment's Windows client has none either.
 
 ## 13. Discovery record
@@ -803,4 +808,5 @@ Nothing else is excepted. Adding an entry needs the owner's approval.
 | Non-goals | Enterprise fleet features |
 | Release 1.0 | Windows daily driver: Windows host and client, desktop work, coding and gaming, self-hosted server, terminals and Wake-on-LAN |
 | Drivers in 1.0 | Existing signed drivers first; first-party drivers later |
+| Spec approval | Approved as drafted on 2026-11-24 ("approved, commit and start M1"), which covers the items the draft marked as proposals: the success-measure numbers, Windows 11 as the floor, the three additional non-goals, the first-party audio codec, and basic UAC and login-screen handling inside 1.0 |
 | Build order | Defer the desktop app until after M6: build all the necessary code and logic on the Linux machine first, then build the desktop app on a Windows machine |
