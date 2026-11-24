@@ -1617,6 +1617,93 @@ case_portable_self_classification() {
   expect_eq "$(tail -n 1 <<<"$OUT")" linux "DomentPlatform of Doment.Agent"
 }
 
+CASES+=(portable_assembly)
+case_portable_assembly() {
+  local root=$FIXTURE_RUN/portable_assembly row name expected
+  portable_library portable_assembly src/NativeDll ''
+  write_file "$root/src/NativeDll/Native.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+namespace NativeDll;
+
+internal static class Native
+{
+    [DllImport("libc")]
+    internal static extern int getpid();
+}
+CS
+  portable_library portable_assembly src/NativeLib $'\n    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>'
+  write_file "$root/src/NativeLib/Native2.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+namespace NativeLib;
+
+internal static partial class Native2
+{
+    [LibraryImport("libc")]
+    internal static partial int getppid();
+}
+CS
+  portable_library portable_assembly src/NativeLoad ''
+  write_file "$root/src/NativeLoad/Loader.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+namespace NativeLoad;
+
+public static class Loader
+{
+    public static bool Load() => NativeLibrary.TryLoad("libc", out _);
+}
+CS
+  portable_library portable_assembly src/OsAttribute ''
+  write_file "$root/src/OsAttribute/Sample.cs" <<'CS'
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("linux")]
+
+namespace OsAttribute;
+
+public static class Sample
+{
+    public static int Value => 1;
+}
+CS
+  portable_library portable_assembly src/Clean ''
+  write_file "$root/src/Clean/Sample.cs" <<'CS'
+namespace Clean;
+
+public static class Sample
+{
+    public static int Value => 1;
+}
+CS
+
+  local rows=(
+    'NativeDll|declares a native import Native\.getpid from libc'
+    'NativeLib|declares a native import Native2\.\S+ from libc'
+    'NativeLoad|references System\.Runtime\.InteropServices\.NativeLibrary'
+    'OsAttribute|carries the assembly attribute SupportedOSPlatform\("linux"\)'
+  )
+  for row in "${rows[@]}"; do
+    name=${row%%|*}
+    expected="error DOMENT033: $name is portable but ${row#*|}( \\[|\$)"
+    dn build "$root/src/$name"
+    expect_rc 1
+    expect_count 'error DOMENT033' 1
+    expect_count "$expected" 1
+    if [[ $name == NativeDll ]]; then
+      dn build "$root/src/$name"
+      expect_rc 1
+      expect_count "$expected" 1
+    fi
+    dn build "$root/src/$name" -p:DomentPlatform=linux
+    expect_rc 0
+    dn build "$root/src/$name" -p:DesignTimeBuild=true
+    expect_no_out 'DOMENT033'
+  done
+  dn build "$root/src/Clean"
+  expect_rc 0
+  expect_no_out 'DOMENT033'
+}
+
 CASES+=(gate_repository)
 case_gate_repository() {
   OUT=$(DOMENT_GATE_NO_FETCH=1 timeout 1800 bash "$REPO_ROOT/build/gate.sh" 2>&1) && RC=0 || RC=$?

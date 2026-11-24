@@ -12,6 +12,26 @@
     <NoWarn>$([System.Text.RegularExpressions.Regex]::Replace('$(NoWarn)', '(?i)(^|[;,\s])CA1416(?=$|[;,\s])', '$1'))</NoWarn>
   </PropertyGroup>
 
+  <UsingTask TaskName="DomentPortableAssemblyCheck"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)Doment.PortableCheck.cs" />
+    </Task>
+  </UsingTask>
+
+  <!-- No stamp: a failed check must fail again on the next build, when CoreCompile is up to date. -->
+  <Target Name="DomentPortableAssemblyCheck"
+          AfterTargets="CoreCompile"
+          Condition="'$(DomentPlatform)' == 'portable' and '$(UsingMicrosoftNETSdk)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_DomentPortableAssembly>@(IntermediateAssembly->'%(FullPath)')</_DomentPortableAssembly>
+    </PropertyGroup>
+    <DomentPortableAssemblyCheck AssemblyPath="$(_DomentPortableAssembly)"
+                                 ProjectName="$(MSBuildProjectName)"
+                                 Condition="Exists('$(_DomentPortableAssembly)')" />
+  </Target>
+
   <Target Name="DomentPortableTargetFramework"
           BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences"
           Condition="'$(DomentPlatform)' == 'portable' and '$(UsingMicrosoftNETSdk)' == 'true' and '$(TargetFramework)' != 'net10.0'">
