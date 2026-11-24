@@ -1,9 +1,12 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Doment.Agent/Doment.Agent.csproj" />
+    <Project Path="src/Doment.Cli/Doment.Cli.csproj" />
     <Project Path="src/Doment.Client/Doment.Client.csproj" />
     <Project Path="src/Doment.Core/Doment.Core.csproj" />
     <Project Path="src/Doment.Host/Doment.Host.csproj" />
     <Project Path="src/Doment.Protocol/Doment.Protocol.csproj" />
+    <Project Path="src/Doment.Server/Doment.Server.csproj" />
     <Project Path="src/Doment.Simulation/Doment.Simulation.csproj" />
     <Project Path="src/Doment.Worker/Doment.Worker.csproj" />
   </Folder>

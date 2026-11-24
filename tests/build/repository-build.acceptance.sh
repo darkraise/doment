@@ -158,6 +158,9 @@ A3_ROWS=(
   "src/Doment.Worker/Doment.Worker.csproj|Doment.Core.csproj"
   "src/Doment.Host/Doment.Host.csproj|Doment.Worker.csproj"
   "src/Doment.Client/Doment.Client.csproj|Doment.Core.csproj"
+  "src/Doment.Server/Doment.Server.csproj|Doment.Core.csproj"
+  "src/Doment.Cli/Doment.Cli.csproj|Doment.Client.csproj"
+  "src/Doment.Agent/Doment.Agent.csproj|Doment.Host.csproj"
   "tests/Doment.Core.Tests/Doment.Core.Tests.csproj|Doment.Core.csproj"
 )
 
@@ -184,6 +187,39 @@ t_A3() {
     grep -Eq '^[A-Za-z]' <<<"$refs" || note "no ReferencePath read for $proj: $(head -n 3 <<<"$refs")"
     if grep -qx 'Doment.Simulation.dll' <<<"$refs"; then note "$proj has Doment.Simulation in its ReferencePath"; fi
   done < <(solution_projects)
+}
+
+EXECUTABLES=(
+  "src/Doment.Server/Doment.Server.csproj|doment-server"
+  "src/Doment.Cli/Doment.Cli.csproj|doment"
+  "src/Doment.Agent/Doment.Agent.csproj|doment-agent"
+)
+
+t_A4() {
+  local row proj name stdout
+  for row in "${EXECUTABLES[@]}"; do
+    proj=${row%%|*}
+    name=${row#*|}
+    case_ "$name --version"
+    if [[ ! -f $REPO_ROOT/$proj ]]; then
+      note "no project $proj"
+      continue
+    fi
+    stdout=$(cd "$REPO_ROOT" && timeout 600 dotnet run --project "$proj" -c Release -- --version 2>"$T/a4.err") && RC=0 || RC=$?
+    OUT=$stdout$'\n'$(cat "$T/a4.err")
+    rc_is 0
+    OUT=$stdout
+    has "^${name} 0\\.1\\.0([+-]|\$)"
+
+    case_ "$name --bogus"
+    stdout=$(cd "$REPO_ROOT" && timeout 600 dotnet run --project "$proj" -c Release -- --bogus 2>"$T/a4.err") && RC=0 || RC=$?
+    OUT=$stdout$'\n'$(cat "$T/a4.err")
+    rc_is 2
+    OUT=$(cat "$T/a4.err")
+    has "^usage: ${name} \\[--version \\| --help\\]\$"
+    OUT=$stdout
+    hasnt '^usage:'
+  done
 }
 
 t_A17() {
@@ -273,6 +309,7 @@ TESTS=(
   "A1: the SDK on PATH is 10.0.404 or a later 10.0.4xx and global.json pins it with the testing platform|t_A1"
   "A2: the solution builds in Release with no warning|t_A2"
   "A3: each project references exactly its section 3 row and only Doment.Simulation holds Doment.Simulation|t_A3"
+  "A4: each executable prints its name and version on --version and the usage on stderr with exit 2 otherwise|t_A4"
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
   "A17: dotnet test runs the solution's five tests on the testing platform|t_A17"
   "A20: the gate passes on this tree and every platform row is added by the .NET SDK|t_A20"
