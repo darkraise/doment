@@ -1,1 +1,13 @@
-build/darkraise-framework.pin text eol=lf
+* text=auto eol=lf
+*.dll -text
+*.exe -text
+*.so -text
+*.dylib -text
+*.a -text
+*.lib -text
+*.sys -text
+*.nupkg -text
+*.snupkg -text
+*.png -text
+*.jpg -text
+*.ico -text

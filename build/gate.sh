@@ -22,6 +22,14 @@ TREE=$(git -C "$TREE_ARG" rev-parse --show-toplevel 2>/dev/null) || {
   echo "gate: $TREE_ARG is not a git work tree" >&2
   exit 2
 }
+# MSBuild gives these characters a meaning of its own in paths; `&` and `<` also break the inline
+# tasks, whose RoslynCodeTaskFactory body is re-parsed as XML after the path is expanded into it.
+for c in ';' '%' '$' '@' '"' ',' '&' '<'; do
+  if [[ $TREE == *"$c"* ]]; then
+    echo "gate: $TREE contains '$c', which MSBuild cannot take in a path" >&2
+    exit 2
+  fi
+done
 # The tree's global.json, if any, selects the SDK.
 cd "$TREE"
 REGISTER=$TREE/docs/third-party-exceptions.md
@@ -88,8 +96,14 @@ done
 
 # The framework check is the same for the whole tree, and runs even when the tree has no project.
 FRAMEWORK_PROJECT=$TMP/framework-check.proj
+# The quoted replacements keep bash 5.2's patsub_replacement from reading `&` as the match.
+tree_xml=${TREE//'&'/'&amp;'}
+tree_xml=${tree_xml//'<'/'&lt;'}
+tree_xml=${tree_xml//'>'/'&gt;'}
+tree_xml=${tree_xml//'"'/'&quot;'}
+tree_xml=${tree_xml//\'/'&apos;'}
 printf '<Project>\n  <Import Project="%s/Directory.Build.props" />\n  <Import Project="%s/Directory.Build.targets" />\n</Project>\n' \
-  "$TREE" "$TREE" > "$FRAMEWORK_PROJECT"
+  "$tree_xml" "$tree_xml" > "$FRAMEWORK_PROJECT"
 dn msbuild "$FRAMEWORK_PROJECT" -t:DomentFrameworkCheck -p:FrameworkPinStrict=true
 collect "checking the framework"
 
@@ -116,11 +130,8 @@ if [[ $branch == master || $branch == main ]]; then
   pin=
   [[ -f $pin_file ]] && pin=$(<"$pin_file")
   pin=${pin%$'\r'}
-  # These two lines match the build's own DOMENT006 and DOMENT003 text, so they merge with them.
-  if [[ ! $pin =~ ^[0-9a-f]{40}$ ]]; then
-    violation "error DOMENT006: $pin_file must hold one full 40-character commit hash"
-  elif [[ ! -d $framework ]]; then
-    violation "error DOMENT003: darkraise-framework not found at $framework; run tools/framework.sh sync"
+  if [[ ! $pin =~ ^[0-9a-f]{40}$ || ! -d $framework ]]; then
+    : # The framework check above reports the malformed pin or the missing directory.
   elif ! prefix=$(git -C "$framework" rev-parse --show-prefix 2>/dev/null) || [[ -n $prefix ]]; then
     : # Not a git checkout of its own: the framework check reports DOMENT002, and git here would read the enclosing repository.
   else

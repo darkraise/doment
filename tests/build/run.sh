@@ -1209,6 +1209,85 @@ case_gate_skips_fixtures() {
   expect_count "^error DOMENT010: $T/doment/tests/build/other/Bad.csproj: package Fx.Unlisted 1.0.0" 1
 }
 
+CASES+=(gate_master_pin_lines)
+case_gate_master_pin_lines() {
+  gate_setup
+  echo not-a-pin > build/darkraise-framework.pin
+  run_gate
+  expect_rc 1
+  expect_count 'error DOMENT006:' 1
+  echo "$C1" > build/darkraise-framework.pin
+  OUT=$(DARKRAISE_FRAMEWORK_PATH=$T/missing timeout 1800 bash "$T/doment/build/gate.sh" "$T/doment" 2>&1) && RC=0 || RC=$?
+  expect_rc 1
+  expect_count 'error DOMENT003:' 1
+  local n
+  n=$(grep -c 'DOMENT006\|DOMENT003' "$REPO_ROOT/build/gate.sh" || true)
+  expect_eq "$n" 0 "DOMENT006 and DOMENT003 mentions in build/gate.sh"
+}
+
+CASES+=(gate_tree_path_characters)
+case_gate_tree_path_characters() {
+  gate_setup
+  gate_project src/C/C.csproj
+  git commit -qm "Add C"
+  # The copy leaves the framework worktree behind; the gate is pointed at the original.
+  local odd="$T/odd >dir it's"
+  cp -a "$T/doment" "$odd"
+  rm -rf "$odd/external/darkraise-framework"
+  OUT=$(DARKRAISE_FRAMEWORK_PATH=$WT timeout 1800 bash "$odd/build/gate.sh" "$odd" 2>&1) && RC=0 || RC=$?
+  expect_rc 0
+  expect_out ' 0 violations$'
+  local c dir
+  for c in ';' '%' '$' '@' '"' ',' '&' '<'; do
+    dir="$T/bad${c}tree"
+    git init -q "$dir"
+    OUT=$(timeout 300 bash "$REPO_ROOT/build/gate.sh" "$dir" 2>&1) && RC=0 || RC=$?
+    expect_rc 2
+    expect_count "^gate: $(printf '%s' "$dir" | sed 's/[][\.*^$+?(){}|]/\\&/g') contains '$(printf '%s' "$c" | sed 's/[][\.*^$+?(){}|]/\\&/g')', which MSBuild cannot take in a path$" 1
+  done
+}
+
+CASES+=(gate_plain_directory_framework)
+case_gate_plain_directory_framework() {
+  gate_setup
+  local outer=$T/outer
+  git init -q "$outer"
+  git -C "$outer" remote add origin "$T/darkraise-framework.origin.git"
+  mkdir -p "$outer/plain"
+  echo plain > "$outer/plain/file.txt"
+  OUT=$(DARKRAISE_FRAMEWORK_PATH=$outer/plain timeout 1800 bash "$T/doment/build/gate.sh" "$T/doment" 2>&1) && RC=0 || RC=$?
+  expect_rc 1
+  expect_out 'error DOMENT002:'
+  expect_no_out 'DOMENT005'
+  [[ ! -e $outer/.git/FETCH_HEAD ]] || fail "the enclosing repository was fetched: $outer/.git/FETCH_HEAD exists"
+}
+
+CASES+=(gate_ls_files_failure)
+case_gate_ls_files_failure() {
+  gate_setup
+  local real_git wrapper=$T/bin/git n
+  real_git=$(command -v git)
+  write_file "$wrapper" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [[ \$arg == ls-files ]]; then
+    count=\$(( \$(cat "$T/ls-files-count" 2>/dev/null || echo 0) + 1 ))
+    echo "\$count" > "$T/ls-files-count"
+    [[ \$count -eq \$DOMENT_FAIL_LS_FILES ]] && exit 128
+    break
+  fi
+done
+exec "$real_git" "\$@"
+SH
+  chmod +x "$wrapper"
+  for n in 1 2 3; do
+    rm -f "$T/ls-files-count"
+    OUT=$(PATH=$T/bin:$PATH DOMENT_FAIL_LS_FILES=$n timeout 1800 bash "$T/doment/build/gate.sh" "$T/doment" 2>&1) && RC=0 || RC=$?
+    expect_rc 1
+    expect_out "^gate: git ls-files failed in $T/doment$"
+  done
+}
+
 CASES+=(gate_repository)
 case_gate_repository() {
   OUT=$(DOMENT_GATE_NO_FETCH=1 timeout 1800 bash "$REPO_ROOT/build/gate.sh" 2>&1) && RC=0 || RC=$?

@@ -128,11 +128,32 @@ t_A1() {
   eq "$(jq -r '.test.runner' "$g" 2>&1)" Microsoft.Testing.Platform "test.runner"
 }
 
+t_A21() {
+  case_ index
+  OUT=$(git -C "$REPO_ROOT" ls-files --eol 2>&1) && RC=0 || RC=$?
+  rc_is 0
+  hasnt '^i/(crlf|mixed) '
+
+  case_ eol
+  local p
+  # check-attr resolves a path whether or not the file exists.
+  for p in build/gate.sh tests/build/run.sh build/Doment.BuildChecks.cs Directory.Build.props \
+    src/Doment.Core/Doment.Core.csproj README.md build/darkraise-framework.pin; do
+    eq "$(git -C "$REPO_ROOT" check-attr eol -- "$p" 2>&1)" "$p: eol: lf" "eol of $p"
+  done
+
+  case_ binary
+  for p in x.dll x.exe x.so x.dylib x.a x.lib x.sys x.nupkg x.snupkg x.png x.jpg x.ico; do
+    eq "$(git -C "$REPO_ROOT" check-attr text -- "$p" 2>&1)" "$p: text: unset" "text of $p"
+  done
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 
 TESTS=(
   "A1: the SDK on PATH is 10.0.404 or a later 10.0.4xx and global.json pins it with the testing platform|t_A1"
+  "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"
 )
 
 passed=0
