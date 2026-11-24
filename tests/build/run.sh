@@ -618,8 +618,7 @@ case_real_framework_strict() {
 XML
   cd "$T/real"
   dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
-    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" \
-    "-p:DomentRegisterFile=$REPO_ROOT/tests/build/fixtures/register-valid/register.md"
+    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages"
   expect_rc 0
   expect_no_out 'DOMENT'
   local packages
@@ -627,8 +626,7 @@ XML
   # Control: the same build against another pin fails, so the check did run on the real framework.
   printf '%040d\n' 0 > "$T/other.pin"
   dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
-    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" "-p:DomentFrameworkPinFile=$T/other.pin" \
-    "-p:DomentRegisterFile=$REPO_ROOT/tests/build/fixtures/register-valid/register.md"
+    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" "-p:DomentFrameworkPinFile=$T/other.pin"
   expect_rc 1
   expect_count "error DOMENT001: darkraise-framework at $fw is at [0-9a-f]{40}, but the pin is 0{40}$" 1
   echo "note real_framework_strict: packages: ${packages:-none}"
