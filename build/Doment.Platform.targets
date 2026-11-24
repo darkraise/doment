@@ -7,9 +7,16 @@
     <DomentPlatform Condition="'$(MSBuildProjectName)' == 'Doment.Platform.Windows' or '$(MSBuildProjectName)' == 'Doment.Service' or '$(MSBuildProjectName)' == 'Doment.Session' or '$(MSBuildProjectName)' == 'Doment.App'">windows</DomentPlatform>
   </PropertyGroup>
 
-  <!-- NoWarn takes ';' and ',' as separators and its codes in any case. -->
+  <!-- NoWarn takes ';' and ',' as separators and its codes in any case. Each of the other properties turns
+       CA1416 off or down when a project sets it in its own file; an AnalysisLevel ending in none disables
+       every analyzer rule. -->
   <PropertyGroup Condition="'$(DomentPlatform)' == 'portable'">
     <NoWarn>$([System.Text.RegularExpressions.Regex]::Replace('$(NoWarn)', '(?i)(^|[;,\s])CA1416(?=$|[;,\s])', '$1'))</NoWarn>
+    <RunAnalyzers>true</RunAnalyzers>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel Condition="$([System.String]::Copy('$(AnalysisLevel)').ToLowerInvariant().EndsWith('none'))">latest-recommended</AnalysisLevel>
+    <AnalysisLevelInteroperability Condition="$([System.String]::Copy('$(AnalysisLevelInteroperability)').ToLowerInvariant().EndsWith('none'))"></AnalysisLevelInteroperability>
+    <WarningsAsErrors>$(WarningsAsErrors);CA1416</WarningsAsErrors>
   </PropertyGroup>
 
   <UsingTask TaskName="DomentPortableAssemblyCheck"

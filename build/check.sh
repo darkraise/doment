@@ -92,6 +92,7 @@ call() {
   LIMIT=${DOMENT_CHECK_TIMEOUT:-$1}
   shift
   COMMAND="$*"
+  local start=$SECONDS
   (cd "$ROOT" && exec setsid timeout -k 10 "$LIMIT" "$@") > "$OUTPUT" 2>&1 &
   CHILD=$!
   wait "$CHILD"
@@ -100,7 +101,8 @@ call() {
   kill -KILL -- "-$CHILD" 2>/dev/null
   CHILD=
   TIMED_OUT=0
-  [[ $RC -eq 124 || $RC -eq 137 ]] && TIMED_OUT=1
+  # 137 is also a SIGKILL from outside, such as the out-of-memory killer, before the limit.
+  [[ $RC -eq 124 || ($RC -eq 137 && $((SECONDS - start)) -ge $LIMIT) ]] && TIMED_OUT=1
   return 0
 }
 
@@ -132,6 +134,10 @@ step_build() {
 projects() {
   call_ok 600 dotnet sln "$SOLUTION" list || return 1
   mapfile -t PROJECTS < <(tr '\\' '/' < "$OUTPUT" | grep -E '\.(cs|fs|vb)proj$')
+  if [[ ${#PROJECTS[@]} -eq 0 ]]; then
+    echo "dotnet sln list named no project in $SOLUTION" > "$CAUSE"
+    return 1
+  fi
 }
 
 # property <project> <name>: sets VALUE to the project's evaluated property.
@@ -142,10 +148,11 @@ property() {
 
 step_portable() {
   projects || return 1
-  local proj rid flags
+  local proj rid flags built=0
   for proj in "${PROJECTS[@]}"; do
     property "$proj" DomentPlatform || return 1
-    [[ $VALUE == portable ]] || continue
+    [[ ${VALUE,,} == portable ]] || continue
+    built=$((built + 1))
     for rid in linux-x64 win-x64; do
       echo "check: portable $(basename "$proj" .csproj) $rid"
       # A NativeAOT executable built for win-x64 would restore runtime.win-x64.Microsoft.DotNet.ILCompiler
@@ -155,14 +162,19 @@ step_portable() {
       call_ok 600 dotnet build "$ROOT/$proj" "${PROPS[@]}" -r "$rid" "${flags[@]}" "${DN_FLAGS[@]}" || return 1
     done
   done
+  if [[ $built -eq 0 ]]; then
+    echo "no project in $SOLUTION is portable" > "$CAUSE"
+    return 1
+  fi
 }
 
 step_aot() {
   projects || return 1
-  local proj name version dir first
+  local proj name version dir first published=0
   for proj in "${PROJECTS[@]}"; do
     property "$proj" PublishAot || return 1
-    [[ $VALUE == true ]] || continue
+    [[ ${VALUE,,} == true ]] || continue
+    published=$((published + 1))
     property "$proj" AssemblyName || return 1
     name=$VALUE
     property "$proj" VersionPrefix || return 1
@@ -183,6 +195,10 @@ step_aot() {
       return 1
     fi
   done
+  if [[ $published -eq 0 ]]; then
+    echo "no project in $SOLUTION sets PublishAot" > "$CAUSE"
+    return 1
+  fi
 }
 
 step_test() {

@@ -369,7 +369,8 @@ gate: <p> projects checked, <k> packages seen, <v> violations
 
 It exits 0 when there is no violation, 1 when there is any, and 2 when `<tree>` is not a git work tree or its path
 holds one of `;`, `%`, `$`, `@`, `"`, `,`, `&` and `<`, which MSBuild cannot take in a path (`&` and `<` also break
-the inline build tasks, whose bodies MSBuild re-parses as XML after expanding the path into them). On `master` or
+the inline build tasks, whose bodies MSBuild re-parses as XML after expanding the path into them). The refusal
+covers the tree path only; a `DARKRAISE_FRAMEWORK_PATH` holding these characters is not checked. On `master` or
 `main` with a malformed pin or no framework worktree, the gate skips the ancestry check and leaves the report to the
 framework check, so each problem is reported once. `.gitattributes` makes every text file LF and marks the binary
 types above as not text.
@@ -425,7 +426,9 @@ CSharpier version together.
 | `DomentFormatCheck` | `build/Doment.Format.targets`, after the project body | `true`; only a global `false` turns the format check off |
 | `DomentAuditStrict` | `build/Doment.Conventions.props` | `false` by default, `true` in `build/check.sh` |
 
-A portable project cannot switch CA1416 off with `NoWarn`. Diagnostics:
+A portable project cannot switch CA1416 off in its own file with `NoWarn`, `RunAnalyzers`, `EnableNETAnalyzers`,
+an `AnalysisLevel` or `AnalysisLevelInteroperability` ending in `none`, or by clearing `TreatWarningsAsErrors` and
+`WarningsAsErrors`: `build/Doment.Platform.targets` sets them back after the project body. Diagnostics:
 
 | Code | When |
 |---|---|
@@ -437,7 +440,8 @@ A portable project cannot switch CA1416 off with `NoWarn`. Diagnostics:
 The assembly findings of DOMENT033 come from `build/Doment.PortableCheck.cs`, a reader of the output assembly's
 metadata tables in netstandard 2.0 code, because the inline task factory cannot reference
 `System.Reflection.Metadata`. A Windows-only call guarded by `OperatingSystem.IsWindows()`, an API .NET does not
-annotate, and `#pragma` or `SuppressMessage` suppressions pass these checks; review catches them.
+annotate, `#pragma` or `SuppressMessage` suppressions, and a CA1416 severity set in an `.editorconfig` or
+`.globalconfig` below the root pass these checks; review catches them.
 
 ### `build/check.sh`
 

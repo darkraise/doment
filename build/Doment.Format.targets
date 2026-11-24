@@ -3,6 +3,7 @@
   <PropertyGroup>
     <DomentFormatCheck>true</DomentFormatCheck>
     <_DomentFormatStamp>$(IntermediateOutputPath)doment-format.stamp</_DomentFormatStamp>
+    <_DomentFormatList>$(IntermediateOutputPath)doment-format.files</_DomentFormatList>
   </PropertyGroup>
 
   <UsingTask TaskName="DomentFormatBatches"
@@ -66,13 +67,19 @@
       <_DomentFormatConfig Include="$(DomentRepoRoot).csharpierignore" Condition="Exists('$(DomentRepoRoot).csharpierignore')" />
       <_DomentFormatConfig Include="$(DomentRepoRoot).config/dotnet-tools.json" Condition="Exists('$(DomentRepoRoot).config/dotnet-tools.json')" />
     </ItemGroup>
+    <!-- Timestamps alone miss a file added with an older time (a move, cp -p, an archive), so the list of
+         checked files is an input too; it is rewritten only when it changes. -->
+    <WriteLinesToFile File="$(_DomentFormatList)"
+                      Lines="@(_DomentFormatFile->'%(FullPath)');@(_DomentFormatConfig->'%(FullPath)')"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
   </Target>
 
   <Target Name="DomentFormatCheck"
           BeforeTargets="CoreCompile"
           DependsOnTargets="_DomentFormatInputs"
           Condition="'$(DesignTimeBuild)' != 'true' and '$(DomentFormatCheck)' == 'true'"
-          Inputs="@(_DomentFormatFile);@(_DomentFormatConfig)"
+          Inputs="@(_DomentFormatFile);@(_DomentFormatConfig);$(_DomentFormatList)"
           Outputs="$(_DomentFormatStamp)">
     <Exec Command="dotnet csharpier --version"
           WorkingDirectory="$(MSBuildProjectDirectory)"
@@ -93,8 +100,8 @@
           IgnoreExitCode="true"
           IgnoreStandardErrorWarningFormat="true"
           ConsoleToMSBuild="true"
-          StandardOutputImportance="normal"
-          StandardErrorImportance="normal">
+          StandardOutputImportance="high"
+          StandardErrorImportance="high">
       <Output TaskParameter="ConsoleOutput" ItemName="_DomentFormatOutput" />
       <Output TaskParameter="ExitCode" ItemName="_DomentFormatExit" />
     </Exec>

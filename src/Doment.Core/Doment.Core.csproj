@@ -6,6 +6,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../Doment.Protocol/Doment.Protocol.csproj" />
-    <ProjectReference Include="$(DarkraiseFrameworkPath)src/Darkraise/Darkraise.csproj" />
+    <ProjectReference Include="$(DomentFrameworkDir)src/Darkraise/Darkraise.csproj" />
   </ItemGroup>
 </Project>

@@ -303,6 +303,31 @@ t_A6() {
   grep -Eq -- "$re" <<<'ILC : Trim analysis warning IL2026: Foo.Bar(): message' || note "/$re/ does not match the ILC warning form"
 }
 
+t_aot_step() {
+  case_ "a wrong --version fails the aot step"
+  local d
+  d=$(standin aot-version)
+  mkdir -p "$d/src/Fx"
+  # True, not true: MSBuild reads booleans in any case, and so must the step.
+  printf '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n    <AssemblyName>fx</AssemblyName>\n    <PublishAot>True</PublishAot>\n  </PropertyGroup>\n</Project>\n' \
+    > "$d/src/Fx/Fx.csproj"
+  printf 'System.Console.WriteLine("fx 9.9.9");\n' > "$d/src/Fx/Program.cs"
+  standin_check "$d" aot
+  rc_is 1
+  has '^check: aot failed$'
+  has "^    .*/fx --version exited 0 with first line 'fx 9\\.9\\.9'; expected 'fx 0\\.1\\.0'\$"
+
+  case_ "a solution with no NativeAOT project fails the aot step"
+  d=$(standin aot-none)
+  mkdir -p "$d/src/Fx"
+  printf '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n' \
+    > "$d/src/Fx/Fx.csproj"
+  standin_check "$d" aot
+  rc_is 1
+  has '^check: aot failed$'
+  has '^    no project in .*/doment\.slnx sets PublishAot$'
+}
+
 t_A7() {
   case_ "check.sh portable"
   [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
@@ -577,6 +602,13 @@ t_A10() {
     <(grep -v -E '^# doment:|^dotnet_diagnostic\.(IDE0161|IDE0028|IDE030[0-5])\.severity' "$ours") 2>&1)
   [[ -z $d ]] || note "the root .editorconfig differs from the framework's beyond the doment changes: $(head -n 12 <<<"$d")"
 
+  case_ "doment severity lines"
+  local id
+  for id in IDE0161 IDE0028 IDE0300 IDE0301 IDE0302 IDE0303 IDE0304 IDE0305; do
+    grep -Eq "^dotnet_diagnostic\\.$id\\.severity = warning\$" "$ours" ||
+      note "the root .editorconfig has no 'dotnet_diagnostic.$id.severity = warning' line"
+  done
+
   case_ csharpierrc
   if [[ ! -f $REPO_ROOT/.csharpierrc ]]; then
     note "no .csharpierrc at the repository root"
@@ -615,6 +647,7 @@ TESTS=(
   "A4: build/check.sh aot publishes the three executables, which print their name and version|t_A4"
   "A5: the executables restore NativeAOT packages of 10.0.14 or later and the restore has no audit finding|t_A5"
   "A6: a trim warning fails the aot step, and the warning pattern matches ILC's form|t_A6"
+  "aot step: a wrong --version and a solution with no NativeAOT project each fail it|t_aot_step"
   "A7: build/check.sh portable builds every portable project for linux-x64 and win-x64|t_A7"
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
   "A15: DomentSimulation=true gives Doment.Cli and Doment.Agent the simulation reference and constant|t_A15"

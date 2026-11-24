@@ -861,6 +861,8 @@ case_format_unformatted() {
   expect_rc 1
   expect_count 'error DOMENT' 1
   expect_count 'error DOMENT031: Program\.cs is not formatted; run dotnet csharpier format Program\.cs( \[|$)' 1
+  # CSharpier's own report reaches the minimal-verbosity console.
+  expect_out '^ *Error \./Program\.cs - '
   (cd src/Fmt && timeout 300 dotnet csharpier format Program.cs > /dev/null)
   dn build src/Fmt
   expect_rc 0
@@ -877,6 +879,13 @@ case_format_stamp() {
   expect_rc 0
   grep -q 'Skipping target "DomentFormatCheck" because all output files are up-to-date' <<<"$LOG" ||
     fail "the second build did not skip DomentFormatCheck as up to date"
+  # A file added with a time older than the stamp is a changed input all the same.
+  printf 'sealed class   Old{}\n' > src/Fmt/Old.cs
+  touch -d '2000-01-01' src/Fmt/Old.cs
+  dn build src/Fmt
+  expect_rc 1
+  expect_count 'error DOMENT031: Old\.cs is not formatted; run dotnet csharpier format Old\.cs( \[|$)' 1
+  rm src/Fmt/Old.cs
   echo >> .csharpierrc
   dn_log build src/Fmt
   expect_rc 0
@@ -1555,10 +1564,23 @@ XML
 
 CASES+=(portable_windows_api)
 case_portable_windows_api() {
-  local root=$FIXTURE_RUN/portable_windows_api dir
+  local root=$FIXTURE_RUN/portable_windows_api dir row
+  # Each row is a fixture name and the properties its own file sets to switch CA1416 off or down.
+  local rows=(
+    'WinCallNoWarn|<NoWarn>$(NoWarn);CA1416</NoWarn>'
+    'WinCallNoWarnLower|<NoWarn>CA1707,ca1416</NoWarn>'
+    'WinCallNoWarnSpaced|<NoWarn> CA1416 </NoWarn>'
+    'WinCallRunAnalyzers|<RunAnalyzers>false</RunAnalyzers>'
+    'WinCallNetAnalyzers|<EnableNETAnalyzers>false</EnableNETAnalyzers>'
+    'WinCallLevelNone|<AnalysisLevel>latest-none</AnalysisLevel>'
+    'WinCallInteropNone|<AnalysisLevelInteroperability>latest-none</AnalysisLevelInteroperability>'
+    'WinCallWarningsAsErrors|<TreatWarningsAsErrors>false</TreatWarningsAsErrors><WarningsAsErrors></WarningsAsErrors>'
+  )
   portable_library portable_windows_api src/WinCall ''
-  portable_library portable_windows_api src/WinCallNoWarn $'\n    <NoWarn>$(NoWarn);CA1416</NoWarn>'
-  for dir in WinCall WinCallNoWarn; do
+  for row in "${rows[@]}"; do
+    portable_library portable_windows_api "src/${row%%|*}" $'\n    '"${row#*|}"
+  done
+  for dir in WinCall "${rows[@]%%|*}"; do
     write_file "$root/src/$dir/Sample.cs" <<CS
 namespace $dir;
 
@@ -1572,15 +1594,23 @@ public static class Sample
 }
 CS
   done
-  dn build "$root/src/WinCall"
-  expect_rc 1
-  expect_out 'error CA1416:'
-  dn build "$root/src/WinCallNoWarn"
-  expect_rc 1
-  expect_out 'error CA1416:'
+  for dir in WinCall "${rows[@]%%|*}"; do
+    dn build "$root/src/$dir"
+    expect_rc 1 || fail "$dir: $(cat "$FAIL_FILE")"
+    expect_out 'error CA1416:' || fail "$dir: $(cat "$FAIL_FILE")"
+  done
   dn build "$root/src/WinCallNoWarn" -p:DomentPlatform=linux
   expect_rc 0
   expect_no_out 'CA1416'
+}
+
+CASES+=(core_framework_global_path)
+case_core_framework_global_path() {
+  local fw=$REPO_ROOT/external/darkraise-framework
+  # A global property keeps the value as given, without the trailing slash the props add.
+  dn msbuild "$REPO_ROOT/src/Doment.Core/Doment.Core.csproj" -getItem:ProjectReference "-p:DarkraiseFrameworkPath=$fw"
+  expect_rc 0
+  expect_out "\"Identity\": \"$fw/src/Darkraise/Darkraise\\.csproj\""
 }
 
 CASES+=(portable_target_framework)
