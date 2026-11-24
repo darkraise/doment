@@ -18,7 +18,8 @@ Questions put to the owner on 2026-11-24, with the answers quoted, and the appro
    it, since we still need to code in framework". Section 6 designs the pin around that worktree.
    **Approach:** inline - skip 3: the owner chose. An advisor pass on the submodule variant had run before the answer;
    its findings that do not depend on the submodule are carried into sections 5, 6 and 9. Where the worktree lives
-   was not asked and is put to the owner with A10; whether a pin may name an unpushed commit is put with A25.
+   was not asked; owner, at the spec review on 2026-11-24: "Per checkout" (A10). Whether a pin may name an unpushed
+   commit; owner: "Yes, with warning" (A25).
 3. **Terminal sessions across a host service restart.** Asked: the product spec has the host service own the
    pseudo-terminals (section 10, R104) and R145 requires "no lost terminal sessions" across a service restart; both
    cannot hold. Owner: "Yes: separate terminal host (Recommended)". The question stated that "the wording of section 10
@@ -33,8 +34,13 @@ Questions put to the owner on 2026-11-24, with the answers quoted, and the appro
 5. **How the exception check is built.** **Approach:** inline - skip 5: not load-bearing. The mechanism is confined to
    build files and can be replaced without touching product code; its behaviour is fixed by the acceptance statements.
 6. **Fast mode** was not offered: the handoff asked for a written spec.
+7. **R176 and the M2 epic "Local worker link".** Asked at the spec review on 2026-11-24 (A9). Owner: "Approve R176".
 
 CI: none exists yet (the "CI for pushed branches" epic adds it), so no platform is uncovered.
+
+Finish: merge
+
+Worktree: in-place
 
 ## 1. What this epic delivers
 
@@ -135,8 +141,8 @@ defined in `Doment.Worker`. Host code never calls a capture, encode, input or ps
     threads, never on thread-pool reads.
 - **Two implementations:** in-process (unit tests and the M1 walking skeleton) and cross-process (a local socket or
   pipe, plus shared memory for the session agent). The terminal host needs the cross-process one on Linux in M4.
-  Section 8 proposes building and fault-testing it in M2 with a simulated session agent, instead of meeting it first
-  at M7.
+  Section 8 adds R176: it is built and fault-tested in M2 with a simulated session agent, instead of meeting the
+  socket half first in M4 and the shared-memory half first at M7.
 
 ## 4. Module map (R1)
 
@@ -240,8 +246,9 @@ Build order:
   every linked doment worktree each have their own, so two doment branches with different pins build side by side, a
   framework edit in one does not disturb another, and no build writes into a checkout that other apps use. The two
   stub files in `external/` end MSBuild's upward search there, so doment's root build files apply to doment's
-  projects only. The property, or the environment variable `DARKRAISE_FRAMEWORK_PATH`, overrides the default with an
-  absolute path (the property wins when both are set, and the pin check applies to the overridden path); a relative
+  projects only. The framework's CLAUDE.md "One worktree per project" paragraph gains one line naming this
+  arrangement, made in the framework worktree through the framework's own workflow. The property, or the environment
+  variable `DARKRAISE_FRAMEWORK_PATH`, overrides the default with an absolute path (the property wins when both are set, and the pin check applies to the overridden path); a relative
   override fails the build, because project references resolve relative to each project.
 - **The pin.** `build/darkraise-framework.pin` holds one line, the full framework commit this doment commit is built
   and tested against. Initial value: the remote's master, `e3cb121d83147eef363559d6f6bd4becda4b9e89` on 2026-11-24
@@ -393,7 +400,7 @@ Recorded by this epic under R1 (decision 4 and its advisor), confirmed when this
 - Section 10, "Processes": the host service is the only network endpoint; the session agent owns everything that
   needs the interactive session.
 
-Proposed, settled at the spec review (acceptance A9):
+Approved by the owner at the spec review on 2026-11-24 (acceptance A9):
 
 - New M2 epic "Local worker link" with **R176**: "The host service reaches the session agent and the terminal host
   only through the worker link, which has an in-process and a cross-process implementation on Linux; the
@@ -465,8 +472,8 @@ A5. [demo, high] It names one interface for each of the ten platform seams (capt
 A6. [demo, high] It records the build order: portable projects built first on Linux, Windows-bound projects from M7 reached only through seams, and the Linux solution filter from M7.
 A7. [demo, high] It records how doment consumes the framework: one worktree per doment checkout, the property and its overrides, the pin file, `tools/framework.sh`, how the pin moves and is rolled back, which framework projects may be referenced, the contribution rule and the three limits (feature-branch pins can become unbuildable; the framework repository is private; removing a doment worktree without `release` discards uncommitted framework work).
 A8. [demo, high] The product spec carries the amendments of section 8: R1, R4, the section 5 third-party rule, the section 9 row, section 10 (processes, terminals, open decisions), R104 and section 11 with its closing line.
-A9. [demo, medium] The product spec gains R176 and the epic "Local worker link" in M2 (sections 6, 7 and the M2 register), as section 8 words it. Q: Should the cross-process worker link (local socket plus shared-memory ring, with a simulated session agent) be built and fault-tested on Linux in M2, as new requirement R176 and a new M2 epic? Without it the socket half arrives in M4 with the terminal host and the shared-memory half first at M7.
-A10. [test, medium] With no property set, a project that references `$(DarkraiseFrameworkPath)/src/Darkraise/Darkraise.csproj` builds from a doment checkout and from a linked doment worktree, each against its own `external/darkraise-framework`, and two such checkouts with different pins both build with `FrameworkPinStrict=true`. Q: Each doment checkout, including every task worktree, gets its own framework worktree inside it at `external/darkraise-framework`, instead of one shared `../darkraise-framework-doment` like the other apps. Is that the arrangement you want?
+A9. [demo, confirmed] The product spec gains R176 and the epic "Local worker link" in M2 (sections 6, 7 and the M2 register), as section 8 words it.
+A10. [test, confirmed] With no property set, a project that references `$(DarkraiseFrameworkPath)/src/Darkraise/Darkraise.csproj` builds from a doment checkout and from a linked doment worktree, each against its own `external/darkraise-framework`, and two such checkouts with different pins both build with `FrameworkPinStrict=true`.
 A11. [test, neg, high] When the framework directory does not exist, the build fails before compilation with one error that names the path it looked at and `tools/framework.sh sync`.
 A12. [test, high] `tools/framework.sh sync` creates the framework worktree at the pinned commit when none exists and moves a clean one to the pin; after it, a build with `FrameworkPinStrict=true` succeeds.
 A13. [test, neg, high] When the framework worktree's commit differs from the pin, or the worktree has a modified, staged or untracked file anywhere in it, or an ignored file outside `bin`, `obj`, `.vs` and `.idea`, an ordinary build succeeds with one warning DOMENT001 that names the pinned and the actual commit and the first offending path, and a build with `FrameworkPinStrict=true` fails with that message as an error.
@@ -481,7 +488,7 @@ A21. [test, high] One gate command checks every project file tracked in the tree
 A22. [test, neg, high] The gate command fails on a tracked binary file of the listed extensions that no register row lists, naming the file.
 A23. [test, neg, high] The gate command fails on a tracked project file that does not import the root build targets, and on a tool in `.config/dotnet-tools.json` that is not a build-and-test-only row.
 A24. [demo, high] `docs/third-party-exceptions.md` holds the three tables of section 7: X1 and X2 with reason, licence, interface and replacement; xUnit v3, Microsoft Testing Platform and csharpier as build-and-test-only tools approved on 2026-11-24; and the three platform packages.
-A25. [test, neg, medium] `tools/framework.sh sync` refuses to move a framework worktree that has changes or whose HEAD is on no framework branch and no remote-tracking ref, and leaves a moved one on a detached HEAD without touching any branch; `tools/framework.sh pin` refuses to record a commit from a worktree that has changes, and records a commit that is not on the framework's remote with a warning; each says why. Q: May a doment feature branch pin a framework commit that exists only on this machine, with the push required only for CI and for doment's main branch?
+A25. [test, neg, confirmed] `tools/framework.sh sync` refuses to move a framework worktree that has changes or whose HEAD is on no framework branch and no remote-tracking ref, and leaves a moved one on a detached HEAD without touching any branch; `tools/framework.sh pin` refuses to record a commit from a worktree that has changes, and records a commit that is not on the framework's remote with a warning; each says why.
 A26. [test, neg, high] `tools/framework.sh release` refuses a framework worktree with a modified, staged or untracked file, with an ignored file outside `bin`, `obj`, `.vs` and `.idea`, or with a HEAD on no framework branch and no remote-tracking ref; each time it names what it found and leaves the worktree in place. It removes a clean one so that the framework repository no longer lists it.
 
 ## Riskiest assumption
@@ -504,7 +511,7 @@ reference (section 6 evidence), and the restore output lists every resolved pack
 
 ## Out of scope
 
-The wire protocol and handshake (M2); the worker link's mechanism (M2 if R176 is approved, otherwise M4 and M7); seam
+The wire protocol and handshake (M2); the worker link's mechanism (M2, R176); seam
 signatures (the epics of section 5); the solution, analyzers, formatting and `global.json` ("Repository, build and
 NativeAOT"); CI ("CI for pushed branches"); `docs/dforge/gates.md` ("Gates declared").
 
@@ -524,7 +531,7 @@ answered by ruling 22. All rulings are applied above.
 - 9. R2 — met; stands.
 - 10. R3 — met, subject to the answers to A10 and A25.
 - 11. R4 — met once ruling 7 amends its wording.
-- 12. Scope — only R176 (held as a proposal) and the no-signed-in-user sentence went beyond R1 to R4.
+- 12. Scope — only R176 (held as a proposal, approved at the spec review) and the no-signed-in-user sentence went beyond R1 to R4.
 - 13. The critic's six High findings — all resolved by the revised text.
 - 14. Windows terminal host — a mode of `doment-session.exe`; the M7 epic may split it.
 - 15. "Started by the system" — reworded to "outside the service's kill scope", with the Windows launch stated.
