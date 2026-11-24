@@ -256,12 +256,14 @@ Build order:
     LFS downloads (the build does not need the framework's test corpus). It leaves the worktree on a detached HEAD
     and never moves, resets or deletes a branch. It finds the framework clone through `DARKRAISE_FRAMEWORK_REPO`,
     otherwise beside doment's primary checkout; when it finds none it fails and names both places it looked. It
-    refuses to move a worktree that has changes.
+    refuses to move a worktree that has changes, or whose HEAD is reachable from no framework branch and no
+    remote-tracking ref, and says which.
   - `pin` writes the worktree's commit into the pin file. It refuses when the worktree has changes, and warns when
     the commit is not reachable from a branch of the framework's remote.
   - `release` removes the framework worktree through the framework repository (`git worktree remove`). It refuses
-    when the worktree has a modified, staged or untracked file, or when its HEAD is reachable from no framework
-    branch and no remote-tracking ref, and says which.
+    when the worktree is not clean as the checks below define it (a modified, staged or untracked file, or an
+    ignored file outside directories named `bin`, `obj`, `.vs` and `.idea`), or when its HEAD is reachable from no
+    framework branch and no remote-tracking ref, and names the first offending path or the commit.
 
   A doment worktree is removed only after `release`. Known limit: the framework worktree is ignored by doment's git,
   so removing a doment worktree any other way discards uncommitted framework work without a prompt. `sync` also runs
@@ -479,8 +481,8 @@ A21. [test, high] One gate command checks every project file tracked in the tree
 A22. [test, neg, high] The gate command fails on a tracked binary file of the listed extensions that no register row lists, naming the file.
 A23. [test, neg, high] The gate command fails on a tracked project file that does not import the root build targets, and on a tool in `.config/dotnet-tools.json` that is not a build-and-test-only row.
 A24. [demo, high] `docs/third-party-exceptions.md` holds the three tables of section 7: X1 and X2 with reason, licence, interface and replacement; xUnit v3, Microsoft Testing Platform and csharpier as build-and-test-only tools approved on 2026-11-24; and the three platform packages.
-A25. [test, neg, medium] `tools/framework.sh sync` refuses to move a framework worktree that has changes and leaves a moved one on a detached HEAD without touching any branch; `tools/framework.sh pin` refuses to record a commit from a worktree that has changes, and records a commit that is not on the framework's remote with a warning; each says why. Q: May a doment feature branch pin a framework commit that exists only on this machine, with the push required only for CI and for doment's main branch?
-A26. [test, neg, high] `tools/framework.sh release` refuses a framework worktree with an uncommitted change or a commit on no branch, and removes a clean one so that the framework repository no longer lists it.
+A25. [test, neg, medium] `tools/framework.sh sync` refuses to move a framework worktree that has changes or whose HEAD is on no framework branch and no remote-tracking ref, and leaves a moved one on a detached HEAD without touching any branch; `tools/framework.sh pin` refuses to record a commit from a worktree that has changes, and records a commit that is not on the framework's remote with a warning; each says why. Q: May a doment feature branch pin a framework commit that exists only on this machine, with the push required only for CI and for doment's main branch?
+A26. [test, neg, high] `tools/framework.sh release` refuses a framework worktree with a modified, staged or untracked file, with an ignored file outside `bin`, `obj`, `.vs` and `.idea`, or with a HEAD on no framework branch and no remote-tracking ref; each time it names what it found and leaves the worktree in place. It removes a clean one so that the framework repository no longer lists it.
 
 ## Riskiest assumption
 
@@ -546,6 +548,17 @@ answered by ruling 22. All rulings are applied above.
 - 33. A9 — question reworded: the socket half arrives in M4, the shared-memory half at M7.
 - 34. Wording corrections — "network sockets", override precedence, table identifiers, the contents of
   `docs/architecture.md`, the limits named in A7.
+
+Fable spec review, round 2, 2026-11-24, limited to round 1's High finding: answered by ruling 22; two new High
+findings from the applied text, both answered by the rulings below; 0 undecided. All are applied above.
+
+- R2-1. Round 1's High finding (removing a doment worktree deletes framework work) — answered by ruling 22.
+- R2-2. `release` and ignored files — `release` uses the strict check's definition of clean, so ignored framework
+  plans, notes and nested worktrees are not deleted without a refusal.
+- R2-3. `sync` and commits on no branch — `sync` refuses to move a HEAD reachable from no branch or remote-tracking ref.
+- R2-4. A26 — covers the ignored-file refusal and says the worktree is left in place on every refusal.
+- R2-5. A25 — `sync`'s refusal covers a HEAD on no branch.
+- R2-6. A detached HEAD whose commit is on a branch checked out in another worktree — no problem; `release` allows it.
 
 ## Critic findings
 
