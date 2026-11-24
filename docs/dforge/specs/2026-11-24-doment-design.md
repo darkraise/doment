@@ -1,7 +1,7 @@
 # doment — product spec
 
 **Date:** 2026-11-24
-**Status:** draft, awaiting owner approval
+**Status:** approved by the owner on 2026-11-24
 **Research:** docs/dforge/research/2026-11-24-game-streaming.md, 2026-11-24-remote-support.md, 2026-11-24-remote-coding.md,
 2026-11-24-streaming-pipeline.md (all sourced; items they mark "Unverified" stay unverified here)
 
