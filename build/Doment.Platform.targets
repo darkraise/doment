@@ -1,0 +1,25 @@
+<Project>
+  <!-- Set after the project body from the module map's Kind column; MSBuild ignores these assignments when
+       DomentPlatform is a global property, so only -p:DomentPlatform=... overrides the list. -->
+  <PropertyGroup>
+    <DomentPlatform>portable</DomentPlatform>
+    <DomentPlatform Condition="'$(MSBuildProjectName)' == 'Doment.Agent' or '$(MSBuildProjectName)' == 'Doment.Platform.Linux'">linux</DomentPlatform>
+    <DomentPlatform Condition="'$(MSBuildProjectName)' == 'Doment.Platform.Windows' or '$(MSBuildProjectName)' == 'Doment.Service' or '$(MSBuildProjectName)' == 'Doment.Session' or '$(MSBuildProjectName)' == 'Doment.App'">windows</DomentPlatform>
+  </PropertyGroup>
+
+  <!-- NoWarn takes ';' and ',' as separators and its codes in any case. -->
+  <PropertyGroup Condition="'$(DomentPlatform)' == 'portable'">
+    <NoWarn>$([System.Text.RegularExpressions.Regex]::Replace('$(NoWarn)', '(?i)(^|[;,\s])CA1416(?=$|[;,\s])', '$1'))</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="DomentPortableTargetFramework"
+          BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences"
+          Condition="'$(DomentPlatform)' == 'portable' and '$(UsingMicrosoftNETSdk)' == 'true' and '$(TargetFramework)' != 'net10.0'">
+    <PropertyGroup>
+      <_DomentTargets>$(TargetFramework)</_DomentTargets>
+      <_DomentTargets Condition="'$(_DomentTargets)' == ''">$(TargetFrameworks)</_DomentTargets>
+    </PropertyGroup>
+    <Error Code="DOMENT033"
+           Text="$(MSBuildProjectName) is portable but targets $(_DomentTargets); portable projects target net10.0" />
+  </Target>
+</Project>

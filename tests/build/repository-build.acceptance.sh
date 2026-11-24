@@ -286,6 +286,43 @@ t_A20() {
   done <<<"$rows"
 }
 
+# The Kind column of the module map in docs/architecture.md, as "<project> <DomentPlatform value>" lines.
+module_map_platforms() {
+  awk -F'|' '
+    /^## / { t = ($0 == "## Module map") }
+    t && /^\| `/ {
+      p = $2; k = $5
+      gsub(/[ `]/, "", p); gsub(/^ +| +$/, "", k)
+      v = k == "portable" ? "portable" : k == "Linux-bound" ? "linux" : k == "Windows-bound" ? "windows" : "unknown:" k
+      print p, v
+    }
+  ' "$REPO_ROOT/docs/architecture.md"
+}
+
+t_A28() {
+  case_ "module map"
+  [[ -f $REPO_ROOT/doment.slnx ]] || { note "no doment.slnx at the repository root"; return 0; }
+  local map proj name expected actual linux=
+  map=$(module_map_platforms)
+  [[ -n $map ]] || note "no module map rows read from docs/architecture.md"
+  while IFS= read -r proj; do
+    name=$(basename "$proj" .csproj)
+    expected=$(awk -v n="$name" '$1 == n { print $2 }' <<<"$map")
+    if [[ -z $expected ]]; then
+      if [[ $name == Doment.Core.Tests ]]; then
+        expected=portable
+      else
+        note "$name has no module map row"
+        continue
+      fi
+    fi
+    actual=$(cd "$REPO_ROOT" && timeout 600 dotnet msbuild "$proj" -nologo -getProperty:DomentPlatform 2>&1)
+    eq "$actual" "$expected" "DomentPlatform of $name"
+    [[ $actual == linux ]] && linux+="$name "
+  done < <(solution_projects)
+  eq "$linux" "Doment.Agent " "the linux projects"
+}
+
 # The framework's .editorconfig as doment adopts it: without the DRUI020 line and the comment block directly above
 # it, and with LF line endings.
 framework_editorconfig() {
@@ -352,6 +389,7 @@ TESTS=(
   "A17: dotnet test runs the solution's five tests on the testing platform|t_A17"
   "A20: the gate passes on this tree and every platform row is added by the .NET SDK|t_A20"
   "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"
+  "A28: each solution project's DomentPlatform matches its module map Kind and only Doment.Agent is linux|t_A28"
 )
 
 passed=0

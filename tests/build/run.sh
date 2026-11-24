@@ -1185,13 +1185,13 @@ case_framework_refs() {
   fixture_project framework_windows src/WinApp net10.0-windows \
     "project=$fw/src/Darkraise.Win32UI/Darkraise.Win32UI.csproj" \
     "project=$fw/src/Darkraise.Win32UI.Generators/Darkraise.Win32UI.Generators.csproj"
-  dn msbuild "$root/src/WinApp" -t:DomentReferenceCheck
+  dn msbuild "$root/src/WinApp" -t:DomentReferenceCheck -p:DomentPlatform=windows
   expect_rc 0
   expect_no_out 'DOMENT012'
 
   root=$FIXTURE_RUN/framework_windows_api
   fixture_project framework_windows_api src/WinApp net10.0-windows "project=$fw/src/Darkraise.Api/Darkraise.Api.csproj"
-  dn msbuild "$root/src/WinApp" -t:DomentReferenceCheck
+  dn msbuild "$root/src/WinApp" -t:DomentReferenceCheck -p:DomentPlatform=windows
   expect_rc 1
   expect_count "error DOMENT012: $root/src/WinApp/WinApp.csproj: project reference $fw/src/Darkraise.Api/Darkraise.Api.csproj is not an allowed darkraise-framework project$" 1
 }
@@ -1537,6 +1537,84 @@ case_simulation_reference_without_property() {
   dn publish "$root/src/App2" -c Release
   expect_rc 1
   expect_count "$SIMULATION_ERROR" 1
+}
+
+# portable_library <case> <dir> <extra PropertyGroup XML>: a net10.0 library at <dir> of the case's fixture tree.
+portable_library() {
+  local root=$FIXTURE_RUN/$1
+  mkdir -p "$root"
+  [[ -f $root/register.md ]] || cp "$REPO_ROOT/tests/build/fixtures/register-valid/register.md" "$root/register.md"
+  write_file "$root/$2/$(basename "$2").csproj" <<XML
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>$3
+  </PropertyGroup>
+</Project>
+XML
+}
+
+CASES+=(portable_windows_api)
+case_portable_windows_api() {
+  local root=$FIXTURE_RUN/portable_windows_api dir
+  portable_library portable_windows_api src/WinCall ''
+  portable_library portable_windows_api src/WinCallNoWarn $'\n    <NoWarn>$(NoWarn);CA1416</NoWarn>'
+  for dir in WinCall WinCallNoWarn; do
+    write_file "$root/src/$dir/Sample.cs" <<CS
+namespace $dir;
+
+public static class Sample
+{
+    public static bool Exists()
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey("x");
+        return key is not null;
+    }
+}
+CS
+  done
+  dn build "$root/src/WinCall"
+  expect_rc 1
+  expect_out 'error CA1416:'
+  dn build "$root/src/WinCallNoWarn"
+  expect_rc 1
+  expect_out 'error CA1416:'
+  dn build "$root/src/WinCallNoWarn" -p:DomentPlatform=linux
+  expect_rc 0
+  expect_no_out 'CA1416'
+}
+
+CASES+=(portable_target_framework)
+case_portable_target_framework() {
+  local root=$FIXTURE_RUN/portable_target_framework
+  fixture_project portable_target_framework src/WinOnly net10.0-windows
+  # The WindowsDesktop reference pack comes from the user's package folder; the run's feed is empty.
+  local fallback="-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages"
+  dn build "$root/src/WinOnly" "$fallback"
+  expect_rc 1
+  expect_count 'error DOMENT' 1
+  expect_count 'error DOMENT033: WinOnly is portable but targets net10\.0-windows; portable projects target net10\.0( \[|$)' 1
+  expect_no_out 'WinOnly -> '
+  dn build "$root/src/WinOnly" "$fallback" -p:DomentPlatform=windows
+  expect_rc 0
+
+  gate_setup
+  run_gate
+  expect_rc 0
+  expect_out '^gate: 0 projects checked, 0 packages seen, 0 violations$'
+  expect_no_out 'DOMENT033'
+}
+
+CASES+=(portable_self_classification)
+case_portable_self_classification() {
+  local root=$FIXTURE_RUN/portable_self_classification
+  portable_library portable_self_classification src/App $'\n    <DomentPlatform>linux</DomentPlatform>'
+  portable_library portable_self_classification src/Doment.Agent ''
+  dn msbuild "$root/src/App" -getProperty:DomentPlatform
+  expect_rc 0
+  expect_eq "$(tail -n 1 <<<"$OUT")" portable "DomentPlatform of App"
+  dn msbuild "$root/src/Doment.Agent" -getProperty:DomentPlatform
+  expect_rc 0
+  expect_eq "$(tail -n 1 <<<"$OUT")" linux "DomentPlatform of Doment.Agent"
 }
 
 CASES+=(gate_repository)
