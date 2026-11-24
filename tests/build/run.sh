@@ -591,6 +591,98 @@ XML
   rm -rf "$T/real"
 }
 
+CASES+=(pinverb_records)
+case_pinverb_records() {
+  synced_setup
+  git -C "$WT" switch -q -c feature
+  local c2
+  c2=$(framework_commit "$WT" feature.txt)
+  fw_sh pin
+  expect_rc 0
+  cmp -s build/darkraise-framework.pin <(printf '%s\n' "$c2") || fail "pin file is not exactly '$c2\\n': $(od -c build/darkraise-framework.pin | head -n 3)"
+  expect_out "^framework.sh: warning: $c2 is not on any branch of the framework's remote$"
+  git -C "$WT" push -q origin feature
+  git -C "$WT" fetch -q origin
+  fw_sh pin
+  expect_rc 0
+  expect_no_out 'warning'
+  cmp -s build/darkraise-framework.pin <(printf '%s\n' "$c2") || fail "pin file changed after the second pin"
+}
+
+CASES+=(pinverb_refuses_dirty)
+case_pinverb_refuses_dirty() {
+  synced_setup
+  git -C "$WT" switch -q -c feature
+  framework_commit "$WT" feature.txt >/dev/null
+  echo '// new' > "$WT/src/Darkraise/New.cs"
+  local before
+  before=$(<build/darkraise-framework.pin)
+  fw_sh pin
+  expect_rc 1
+  expect_out "^framework.sh: $WT is not clean \(first: src/Darkraise/New.cs\)$"
+  expect_eq "$(<build/darkraise-framework.pin)" "$before" "pin file after refusing"
+}
+
+release_row_modified() { echo '// changed' >> "$WT/src/Darkraise/Class1.cs"; ROW_FILE=src/Darkraise/Class1.cs; }
+release_row_staged() { echo staged > "$WT/staged.txt"; git -C "$WT" add staged.txt; ROW_FILE=staged.txt; }
+release_row_untracked() { echo '// new' > "$WT/src/Darkraise/New.cs"; ROW_FILE=src/Darkraise/New.cs; }
+release_row_ignored_docs() { mkdir -p "$WT/docs/dforge"; echo plan > "$WT/docs/dforge/plan.md"; ROW_FILE=docs/dforge/plan.md; }
+release_row_ignored_worktrees() { mkdir -p "$WT/.worktrees/x"; echo x > "$WT/.worktrees/x/file"; ROW_FILE=.worktrees/x/file; }
+release_row_stray_commit() { framework_commit "$WT" stray.txt >/dev/null; ROW_FILE=stray.txt; }
+
+CASES+=(release_refuses)
+case_release_refuses() {
+  local case_root=$T row expected
+  for row in modified:src/Darkraise/Class1.cs staged:staged.txt untracked:src/Darkraise/New.cs \
+    ignored_docs:docs/dforge/ ignored_worktrees:.worktrees/ stray_commit:HEAD; do
+    expected=${row#*:}
+    row=${row%%:*}
+    T=$case_root/$row
+    mkdir -p "$T"
+    synced_setup
+    "release_row_$row"
+    fw_sh release
+    expect_rc 1
+    if [[ $expected == HEAD ]]; then
+      expect_out "^framework.sh: $WT HEAD [0-9a-f]{40} is on no framework branch or remote-tracking ref$"
+    else
+      expect_out "^framework.sh: $WT is not clean \(first: $expected\)$"
+    fi
+    [[ -f $WT/$ROW_FILE ]] || fail "$row: $ROW_FILE is gone after the refusal"
+    [[ -f $WT/src/Darkraise/Class1.cs ]] || fail "$row: the worktree's files are gone after the refusal"
+    git -C "$T/darkraise-framework" worktree list --porcelain | grep -qxF "worktree $WT" ||
+      fail "$row: the worktree is no longer listed by the clone"
+  done
+}
+
+CASES+=(release_removes_clean)
+case_release_removes_clean() {
+  synced_setup
+  mkdir -p "$WT/src/Darkraise/obj" "$WT/bin"
+  echo x > "$WT/src/Darkraise/obj/x"
+  echo y > "$WT/bin/y"
+  fw_sh release
+  expect_rc 0
+  [[ ! -e $WT ]] || fail "the worktree directory still exists"
+  if git -C "$T/darkraise-framework" worktree list --porcelain | grep -qxF "worktree $WT"; then
+    fail "the clone still lists the worktree"
+  fi
+
+  fw_sh sync
+  expect_rc 0
+  git -C "$WT" switch -q -c feature
+  framework_commit "$WT" feature.txt >/dev/null
+  git -C "$WT" switch -q --detach
+  fw_sh release
+  expect_rc 0
+  [[ ! -e $WT ]] || fail "the worktree detached at feature's commit still exists"
+  expect_eq "$(git -C "$T/darkraise-framework" branch --list feature --format='%(refname:short)')" feature "feature branch after release"
+
+  fw_sh release
+  expect_rc 0
+  expect_out "^framework.sh: no framework worktree at $WT$"
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 

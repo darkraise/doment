@@ -169,12 +169,42 @@ cmd_sync() {
   echo "framework.sh: $WORKTREE is at $PIN" >&2
 }
 
+cmd_pin() {
+  resolve_paths
+  [[ -e $WORKTREE ]] || die "no framework worktree at $WORKTREE; run tools/framework.sh sync"
+  check_is_framework_worktree
+  check_clean
+  local commit
+  commit=$(git -C "$WORKTREE" rev-parse HEAD)
+  printf '%s\n' "$commit" > "$PIN_FILE"
+  echo "framework.sh: pinned $commit" >&2
+  timeout 120 git -C "$WORKTREE" fetch --quiet origin ||
+    echo "framework.sh: warning: could not fetch the framework's remote" >&2
+  local remote_refs
+  if ! remote_refs=$(git -C "$WORKTREE" for-each-ref --contains "$commit" refs/remotes); then
+    echo "framework.sh: warning: could not check whether $commit is on the framework's remote" >&2
+  elif [[ -z $remote_refs ]]; then
+    echo "framework.sh: warning: $commit is not on any branch of the framework's remote" >&2
+  fi
+}
+
+cmd_release() {
+  resolve_paths
+  if [[ ! -e $WORKTREE ]]; then
+    echo "framework.sh: no framework worktree at $WORKTREE" >&2
+    return 0
+  fi
+  check_is_framework_worktree
+  check_clean
+  check_reachable
+  git -C "$CLONE" worktree remove "$WORKTREE"
+  echo "framework.sh: removed $WORKTREE" >&2
+}
+
 [[ $# -eq 1 ]] || usage
 case $1 in
   sync) cmd_sync ;;
-  pin | release)
-    echo "framework.sh: $1 is not implemented yet" >&2
-    exit 2
-    ;;
+  pin) cmd_pin ;;
+  release) cmd_release ;;
   *) usage ;;
 esac
