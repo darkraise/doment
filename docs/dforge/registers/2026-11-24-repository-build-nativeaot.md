@@ -1,0 +1,12 @@
+# Repository, build and NativeAOT — requirements
+
+**Source:** docs/dforge/specs/2026-11-24-doment-design.md, section 6, epic "Repository, build and NativeAOT"; docs/architecture.md, "Rules handed to later epics"
+**Covers:** docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md
+
+| # | Item | Assigned | Acceptance | State | Note |
+|---|---|---|---|---|---|
+| 1 | R5 One solution builds the portable core, the server, the Linux agent and the command-line client; each publishes with NativeAOT for linux-x64 with zero trim and AOT warnings. | docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md | A1-A6, A15-A16 | open | - |
+| 2 | R6 The portable core references no Windows-only API, enforced by compiling it for both linux-x64 and win-x64 on Linux. | docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md | A7-A9 | open | - |
+| 3 | R7 Formatting and analyzer rules match darkraise-framework conventions and are enforced by the build. | docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md | A10-A14 | open | - |
+| 4 | Pin the .NET SDK in global.json; the ILCompiler advisory GHSA-p3jp-9v83-76w9; clang for the link step; wire the simulation build property (handed on by the architecture decisions) | docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md | A1, A4-A5, A15-A16 | open | - |
+| 5 | build/check.sh runs build, portable compile, NativeAOT publish and tests, and docs record it | docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md | A17-A20, A25-A26 | open | - |
