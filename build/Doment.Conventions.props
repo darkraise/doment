@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <AnalysisModeStyle>Default</AnalysisModeStyle>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <WarningsAsErrors>$(WarningsAsErrors);CA1416</WarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- NuGet audit findings stay warnings in a plain build, so a new advisory does not break local work;
+       build/check.sh passes DomentAuditStrict=true to make them errors. -->
+  <PropertyGroup>
+    <DomentAuditStrict Condition="'$(DomentAuditStrict)' == ''">false</DomentAuditStrict>
+    <WarningsNotAsErrors Condition="'$(DomentAuditStrict)' != 'true'">$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <WarningsAsErrors Condition="'$(DomentAuditStrict)' == 'true'">$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+</Project>

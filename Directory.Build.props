@@ -25,4 +25,10 @@
     <DomentBuildOnly Condition="'$(DomentBuildOnly)' == ''">false</DomentBuildOnly>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);DOMENT001;DOMENT002</WarningsNotAsErrors>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)build/Doment.Conventions.props" />
 </Project>

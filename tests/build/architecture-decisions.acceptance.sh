@@ -258,7 +258,7 @@ mk_project() {
     echo '  </ItemGroup>'
     echo '</Project>'
   } | write_file "$dir/$rel/$name.csproj"
-  printf 'namespace %s;\npublic static class Marker { public static int Value => 1; }\n' "${name//./_}" > "$dir/$rel/Marker.cs"
+  printf 'namespace %s;\npublic static class Marker { public static int Value => 1; }\n' "$name" > "$dir/$rel/Marker.cs"
 }
 
 commit_all() { git -C "$1" add -A && git -C "$1" commit -qm "${2:-change}" || die "commit_all $1"; }

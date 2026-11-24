@@ -758,6 +758,89 @@ case_register_valid() {
   expect_no_out 'DOMENT013'
 }
 
+# conventions_source <dir> <file name>: writes stdin as a C# file of the fixture project in <dir>.
+conventions_source() {
+  write_file "$FIXTURE_RUN/conventions_style/$1/$2"
+}
+
+CASES+=(conventions_style)
+case_conventions_style() {
+  local root=$FIXTURE_RUN/conventions_style
+  fixture_project conventions_style src/BlockNamespace net10.0
+  conventions_source src/BlockNamespace Sample.cs <<'CS'
+namespace BlockNamespace
+{
+    public static class Sample
+    {
+        public static int Value => 1;
+    }
+}
+CS
+  fixture_project conventions_style src/ArrayInit net10.0
+  conventions_source src/ArrayInit Sample.cs <<'CS'
+namespace ArrayInit;
+
+public static class Sample
+{
+    public static int Sum()
+    {
+        int[] a = new int[] { 1, 2 };
+        return a[0] + a[1];
+    }
+}
+CS
+  fixture_project conventions_style src/InstanceMethod net10.0
+  conventions_source src/InstanceMethod Sample.cs <<'CS'
+namespace InstanceMethod;
+
+public sealed class Sample
+{
+    public int Value() => 1;
+}
+CS
+  fixture_project conventions_style src/Clean net10.0
+  conventions_source src/Clean Sample.cs <<'CS'
+namespace Clean;
+
+public static class Sample
+{
+    public static int[] Values() => [1, 2];
+}
+CS
+  dn build "$root/src/BlockNamespace"
+  expect_rc 1
+  expect_out 'error IDE0161:'
+  dn build "$root/src/ArrayInit"
+  expect_rc 1
+  expect_out 'error IDE0300:'
+  dn build "$root/src/InstanceMethod"
+  expect_rc 1
+  expect_out 'error CA1822:'
+  dn build "$root/src/Clean"
+  expect_rc 0
+  expect_no_out 'warning'
+}
+
+CASES+=(conventions_audit)
+case_conventions_audit() {
+  local project code
+  fixture_project conventions_audit src/App net10.0
+  project=$FIXTURE_RUN/conventions_audit/src/App/App.csproj
+  dn msbuild "$project" -getProperty:WarningsNotAsErrors
+  expect_rc 0
+  for code in NU1901 NU1902 NU1903 NU1904; do
+    expect_out "(^|;)$code(;|$)"
+  done
+  dn msbuild "$project" -getProperty:WarningsNotAsErrors -p:DomentAuditStrict=true
+  expect_rc 0
+  expect_no_out 'NU190[1-4]'
+  dn msbuild "$project" -getProperty:WarningsAsErrors -p:DomentAuditStrict=true
+  expect_rc 0
+  for code in NU1901 NU1902 NU1903 NU1904; do
+    expect_out "(^|;)$code(;|$)"
+  done
+}
+
 # Drops the column named $2 from every table row in the section headed "## $1".
 drop_column() {
   awk -v heading="## $1" -v column="$2" -F'|' -v OFS='|' '
