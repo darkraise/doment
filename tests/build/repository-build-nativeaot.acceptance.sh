@@ -590,7 +590,7 @@ qa_procs() { # PIDs whose environment holds the marker $1
 t_A19() {
   local d mark pids
   d=$(standin a19 outside)
-  fx "$d" Fx '' '' "$CLEAN_SRC"
+  fx "$d" Fx '' '<Target Name="QaSlow" BeforeTargets="CoreCompile"><Exec Command="sleep 40" /></Target>' "$CLEAN_SRC"
   printf '<Solution>\n  <Folder Name="/src/">\n    <Project Path="src/Fx/Fx.csproj" />\n  </Folder>\n</Solution>\n' > "$d/doment.slnx"
   mark=a19-timeout-$$
   case_ "after a timeout"
@@ -600,7 +600,7 @@ t_A19() {
   has 'timed out after 1 s'
   sleep 3
   pids=$(qa_procs "$mark" | paste -sd' ')
-  [[ -z $pids ]] || note "processes left after the timeout: $(ps -o pid,args -p "${pids// /,}" | cut -c1-200)"
+  [[ -z $pids ]] || { note "processes left after the timeout: $(ps -o pid,args -p "${pids// /,}" | cut -c1-200)"; kill -TERM ${pids} 2>/dev/null; }
   case_ "after SIGTERM during the build step"
   mark=a19-term-$$
   mkdir -p "$d/obj-clean"
@@ -619,7 +619,7 @@ t_A19() {
   wait "$sub" 2>/dev/null
   sleep 5
   pids=$(qa_procs "$mark" | paste -sd' ')
-  [[ -z $pids ]] || note "processes left after SIGTERM: $(ps -o pid,args -p "${pids// /,}" | cut -c1-200)"
+  [[ -z $pids ]] || { note "processes left after SIGTERM: $(ps -o pid,args -p "${pids// /,}" | cut -c1-200)"; kill -TERM ${pids} 2>/dev/null; }
   case_ "after the full check"
   if [[ -n ${ACCEPT_CHECK_MARK:-} ]]; then
     pids=$(qa_procs "$ACCEPT_CHECK_MARK" | paste -sd' ')
