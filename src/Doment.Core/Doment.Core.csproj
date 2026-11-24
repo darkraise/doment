@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Doment.Protocol/Doment.Protocol.csproj" />
+    <ProjectReference Include="$(DarkraiseFrameworkPath)src/Darkraise/Darkraise.csproj" />
+  </ItemGroup>
+</Project>

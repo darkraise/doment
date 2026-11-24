@@ -6,7 +6,7 @@ A new row in the Exceptions or Build-and-test-only tools table needs the owner's
 
 What the check cannot see, so nobody assumes otherwise: source code copied or ported from a third party, native libraries loaded by name at run time, and bundled assets of third-party origin (fonts, images, data files). Each still needs a row by rule; review and the M10 security review enforce it.
 
-Licences of B1 to B3 were read on their repositories on 2026-11-24 (`xunit/xunit`, `microsoft/testfx`, `belav/csharpier`).
+Licences of B1 to B3 were read on their repositories on 2026-11-24 (`xunit/xunit`, `microsoft/testfx`, `belav/csharpier`). The four Microsoft-published packages that B1 and B2 resolve transitively (`Microsoft.Bcl.AsyncInterfaces`, `Microsoft.Win32.Registry`, `System.Security.AccessControl`, `Microsoft.ApplicationInsights`) were listed on 2026-11-24 from probe P5; their MIT licence was read from each package's nuspec.
 
 ## Exceptions
 
@@ -19,8 +19,8 @@ Licences of B1 to B3 were read on their repositories on 2026-11-24 (`xunit/xunit
 
 | ID | Component | Packages or tool | Used for | Licence | Approved |
 |---|---|---|---|---|---|
-| B1 | xUnit v3 | `xunit.v3`, `xunit.v3.*`, `xunit.analyzers` | Unit tests | Apache-2.0 | 2026-11-24 |
-| B2 | Microsoft Testing Platform | `Microsoft.Testing.Platform`, `Microsoft.Testing.Platform.*`, `Microsoft.Testing.Extensions.*` | Test runner | MIT | 2026-11-24 |
+| B1 | xUnit v3 | `xunit.v3`, `xunit.v3.*`, `xunit.analyzers`, `Microsoft.Bcl.AsyncInterfaces`, `Microsoft.Win32.Registry`, `System.Security.AccessControl` | Unit tests | Apache-2.0; MIT for the three Microsoft-published packages | 2026-11-24 |
+| B2 | Microsoft Testing Platform | `Microsoft.Testing.Platform`, `Microsoft.Testing.Platform.*`, `Microsoft.Testing.Extensions.*`, `Microsoft.ApplicationInsights` | Test runner | MIT | 2026-11-24 |
 | B3 | CSharpier | `csharpier` | Formatting | MIT | 2026-11-24 |
 
 ## Platform packages
@@ -29,4 +29,4 @@ Licences of B1 to B3 were read on their repositories on 2026-11-24 (`xunit/xunit
 |---|---|---|
 | `Microsoft.DotNet.ILCompiler` | .NET SDK (NativeAOT publish for linux-x64) | 2026-11-24 |
 | `runtime.linux-x64.Microsoft.DotNet.ILCompiler` | .NET SDK (NativeAOT publish for linux-x64) | 2026-11-24 |
-| `Microsoft.NET.ILLink.Tasks` | .NET SDK (NativeAOT publish for linux-x64) | 2026-11-24 |
+| `Microsoft.NET.ILLink.Tasks` | .NET SDK (NativeAOT publish for linux-x64; trim analysis of IsAotCompatible projects) | 2026-11-24 |

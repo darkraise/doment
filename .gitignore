@@ -3,3 +3,4 @@
 bin/
 obj/
 /tests/build/fixtures/.run/
+/artifacts/

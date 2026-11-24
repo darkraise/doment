@@ -91,6 +91,20 @@ dn() { # dn <dir> <dotnet args...>; ENVV holds NAME=value pairs for this call
 }
 build() { dn "$1" build "${@:2}"; }
 
+# The C4 diagnostic patterns of build/check.sh.
+WARNING_RE='(^|[: ])warning [A-Z]+[0-9]+:'
+
+# One item type of a project, as "<Filename><Extension>" lines in sorted order, read with -getItem (no console
+# logger output, so the JSON stays parseable).
+msb_items() { # msb_items <project> <item type> <dotnet msbuild args...>
+  local proj=$1 item=$2
+  shift 2
+  (cd "$REPO_ROOT" && timeout 600 dotnet msbuild "$proj" -nologo "-getItem:$item" "$@" 2>&1) |
+    jq -r --arg i "$item" '(.Items[$i] // [])[] | .Filename + .Extension' 2>&1 | sort
+}
+
+solution_projects() { sed -nE 's|^ *<Project Path="([^"]+)" */>$|\1|p' "$REPO_ROOT/doment.slnx"; }
+
 # ---------------------------------------------------------------------------
 # Tests
 
@@ -126,6 +140,78 @@ t_A1() {
   eq "$(jq -r '.sdk.version' "$g" 2>&1)" 10.0.404 "sdk.version"
   eq "$(jq -r '.sdk.rollForward' "$g" 2>&1)" latestPatch "sdk.rollForward"
   eq "$(jq -r '.test.runner' "$g" 2>&1)" Microsoft.Testing.Platform "test.runner"
+}
+
+t_A2() {
+  case_ "release build of the solution"
+  [[ -f $REPO_ROOT/doment.slnx ]] || { note "no doment.slnx at the repository root"; return 0; }
+  build "$REPO_ROOT" doment.slnx -c Release -p:FrameworkPinStrict=true
+  rc_is 0
+  hasnt "$WARNING_RE"
+}
+
+# Section 3 of the spec: each project's direct ProjectReference file names.
+A3_ROWS=(
+  "src/Doment.Protocol/Doment.Protocol.csproj|"
+  "src/Doment.Core/Doment.Core.csproj|Darkraise.csproj Doment.Protocol.csproj"
+  "src/Doment.Simulation/Doment.Simulation.csproj|Doment.Core.csproj"
+  "src/Doment.Worker/Doment.Worker.csproj|Doment.Core.csproj"
+  "src/Doment.Host/Doment.Host.csproj|Doment.Worker.csproj"
+  "src/Doment.Client/Doment.Client.csproj|Doment.Core.csproj"
+  "tests/Doment.Core.Tests/Doment.Core.Tests.csproj|Doment.Core.csproj"
+)
+
+t_A3() {
+  case_ "solution projects"
+  [[ -f $REPO_ROOT/doment.slnx ]] || { note "no doment.slnx at the repository root"; return 0; }
+  local listed row proj
+  listed=$(solution_projects | sort)
+  eq "$listed" "$(for row in "${A3_ROWS[@]}"; do echo "${row%%|*}"; done | sort)" "projects of doment.slnx"
+
+  case_ "direct references"
+  for row in "${A3_ROWS[@]}"; do
+    proj=${row%%|*}
+    eq "$(msb_items "$proj" ProjectReference | paste -sd ' ')" "${row#*|}" "ProjectReference of $proj"
+  done
+
+  case_ "simulation reaches no other project"
+  build "$REPO_ROOT" doment.slnx -c Release
+  rc_is 0
+  local refs
+  while IFS= read -r proj; do
+    [[ $proj == src/Doment.Simulation/* ]] && continue
+    refs=$(msb_items "$proj" ReferencePath -p:Configuration=Release -t:ResolveReferences -p:BuildProjectReferences=false)
+    grep -Eq '^[A-Za-z]' <<<"$refs" || note "no ReferencePath read for $proj: $(head -n 3 <<<"$refs")"
+    if grep -qx 'Doment.Simulation.dll' <<<"$refs"; then note "$proj has Doment.Simulation in its ReferencePath"; fi
+  done < <(solution_projects)
+}
+
+t_A17() {
+  case_ "dotnet test"
+  [[ -f $REPO_ROOT/doment.slnx ]] || { note "no doment.slnx at the repository root"; return 0; }
+  # The testing platform's handshake fails with -tl:off or -clp:NoSummary (probe P6), so DN_FLAGS is not used.
+  OUT=$(cd "$REPO_ROOT" && timeout 600 dotnet test --solution doment.slnx -c Release -nologo 2>&1) && RC=0 || RC=$?
+  rc_is 0
+  has '^ *succeeded: 5$'
+  has '^ *failed: 0$'
+}
+
+t_A20() {
+  case_ gate
+  OUT=$(cd "$REPO_ROOT" && DOMENT_GATE_NO_FETCH=1 timeout 900 bash build/gate.sh 2>&1) && RC=0 || RC=$?
+  rc_is 0
+  has '^gate: [0-9]+ projects checked, [0-9]+ packages seen, 0 violations$'
+
+  case_ "platform rows"
+  local rows
+  rows=$(awk '/^## /{ t = ($0 == "## Platform packages") } t && /^\| `/' "$REPO_ROOT/docs/third-party-exceptions.md")
+  [[ -n $rows ]] || note "the register has no Platform packages row"
+  local line added
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    added=$(awk -F'|' '{ gsub(/^ +| +$/, "", $3); print $3 }' <<<"$line")
+    [[ $added == ".NET SDK"* ]] || note "platform row not added by the .NET SDK: $line"
+  done <<<"$rows"
 }
 
 # The framework's .editorconfig as doment adopts it: without the DRUI020 line and the comment block directly above
@@ -185,7 +271,11 @@ t_A21() {
 
 TESTS=(
   "A1: the SDK on PATH is 10.0.404 or a later 10.0.4xx and global.json pins it with the testing platform|t_A1"
+  "A2: the solution builds in Release with no warning|t_A2"
+  "A3: each project references exactly its section 3 row and only Doment.Simulation holds Doment.Simulation|t_A3"
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
+  "A17: dotnet test runs the solution's five tests on the testing platform|t_A17"
+  "A20: the gate passes on this tree and every platform row is added by the .NET SDK|t_A20"
   "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"
 )
 

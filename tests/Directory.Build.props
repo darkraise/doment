@@ -1,0 +1,11 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <XunitV3Version>4.0.2</XunitV3Version>
+    <TestingPlatformVersion>2.5.1</TestingPlatformVersion>
+    <!-- CA1707: xUnit's Method_Scenario_Result names; CA1861: literal arrays in assertions; xUnit1051 asks every
+         call to take TestContext.Current.CancellationToken, and these tests finish in milliseconds. -->
+    <NoWarn>$(NoWarn);CA1707;CA1861;xUnit1051</NoWarn>
+  </PropertyGroup>
+</Project>

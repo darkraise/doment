@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Doment.Client/Doment.Client.csproj" />
+    <Project Path="src/Doment.Core/Doment.Core.csproj" />
+    <Project Path="src/Doment.Host/Doment.Host.csproj" />
+    <Project Path="src/Doment.Protocol/Doment.Protocol.csproj" />
+    <Project Path="src/Doment.Simulation/Doment.Simulation.csproj" />
+    <Project Path="src/Doment.Worker/Doment.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Doment.Core.Tests/Doment.Core.Tests.csproj" />
+  </Folder>
+</Solution>
