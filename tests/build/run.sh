@@ -42,8 +42,11 @@ fail() {
 # (SDK 10.0.302 and 10.0.404), so the console logger is replaced by one that is told NoSummary itself.
 DN_LOGGER=(-noConsoleLogger "-logger:ConsoleLogger,Microsoft.Build;NoSummary;Verbosity=minimal")
 
+# The format check is off by default; the format_ cases clear DN_FORMAT with a local of their own.
+DN_FORMAT=(-p:DomentFormatCheck=false)
+
 dn() {
-  OUT=$(timeout 600 dotnet "$@" -nologo -tl:off -clp:NoSummary "${DN_LOGGER[@]}" \
+  OUT=$(timeout 600 dotnet "$@" -nologo -tl:off -clp:NoSummary "${DN_LOGGER[@]}" "${DN_FORMAT[@]}" \
     "-p:RestoreSources=$FEED" "-p:RestorePackagesPath=$TROOT/pkgs" 2>&1) && RC=0 || RC=$?
 }
 
@@ -819,6 +822,122 @@ CS
   dn build "$root/src/Clean"
   expect_rc 0
   expect_no_out 'warning'
+}
+
+# A synced stand-in with the checkout's formatting files and an empty net10.0 library at src/Fmt. Callers
+# declare `local DN_FORMAT=()` so that dn runs the format check.
+format_setup() {
+  synced_setup
+  local f
+  for f in .editorconfig .csharpierrc .csharpierignore .config/dotnet-tools.json; do
+    mkdir -p "$(dirname "$f")"
+    cp "$REPO_ROOT/$f" "$f"
+  done
+  write_file src/Fmt/Fmt.csproj <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+XML
+}
+
+# dn_log <dotnet args...>: dn with a detailed file log, read into LOG; OUT keeps the console output.
+dn_log() {
+  rm -f "$T/detail.log"
+  dn "$@" -fl "-flp:logfile=$T/detail.log;verbosity=detailed"
+  LOG=$(cat "$T/detail.log" 2>/dev/null || true)
+}
+
+FORMATTED_SOURCE=$'namespace Fmt;\n\npublic static class Sample\n{\n    public static int Value => 1;\n}\n'
+
+CASES+=(format_unformatted)
+case_format_unformatted() {
+  local DN_FORMAT=()
+  format_setup
+  # sealed, so that the formatted file passes CA1852.
+  printf 'sealed class   A{}\n' > src/Fmt/Program.cs
+  dn build src/Fmt
+  expect_rc 1
+  expect_count 'error DOMENT' 1
+  expect_count 'error DOMENT031: Program\.cs is not formatted; run dotnet csharpier format Program\.cs( \[|$)' 1
+  (cd src/Fmt && timeout 300 dotnet csharpier format Program.cs > /dev/null)
+  dn build src/Fmt
+  expect_rc 0
+}
+
+CASES+=(format_stamp)
+case_format_stamp() {
+  local DN_FORMAT=() LOG
+  format_setup
+  printf '%s' "$FORMATTED_SOURCE" > src/Fmt/Sample.cs
+  dn build src/Fmt
+  expect_rc 0
+  dn_log build src/Fmt
+  expect_rc 0
+  grep -q 'Skipping target "DomentFormatCheck" because all output files are up-to-date' <<<"$LOG" ||
+    fail "the second build did not skip DomentFormatCheck as up to date"
+  echo >> .csharpierrc
+  dn_log build src/Fmt
+  expect_rc 0
+  grep -Eq '^[[:space:]]*dotnet csharpier check ' <<<"$LOG" || fail "a changed .csharpierrc did not run the check again"
+  # An input changed again, so only the DesignTimeBuild condition can keep the check from running.
+  echo >> .csharpierrc
+  dn_log build src/Fmt -p:DesignTimeBuild=true
+  grep -q 'CoreCompile' <<<"$LOG" || fail "the design-time build log names no CoreCompile; output: $(tail -n 20 <<<"$OUT")"
+  if grep -Eq '^[[:space:]]*dotnet csharpier (check |--version)' <<<"$LOG"; then fail "a design-time build ran the check"; fi
+}
+
+CASES+=(format_tool_missing)
+case_format_tool_missing() {
+  local DN_FORMAT=()
+  format_setup
+  printf '%s' "$FORMATTED_SOURCE" > src/Fmt/Sample.cs
+  mkdir -p "$T/empty"
+  HOME=$T/empty NUGET_PACKAGES=$T/empty dn build src/Fmt
+  expect_rc 1
+  expect_count 'error DOMENT032: CSharpier is not restored; run dotnet tool restore( \[|$)' 1
+  rm .config/dotnet-tools.json
+  HOME=$T/empty NUGET_PACKAGES=$T/empty dn build src/Fmt
+  expect_rc 1
+  expect_count 'error DOMENT032: CSharpier is not restored; run dotnet tool restore( \[|$)' 1
+}
+
+CASES+=(format_global_only)
+case_format_global_only() {
+  local DN_FORMAT=()
+  format_setup
+  write_file src/Fmt/Fmt.csproj <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <DomentFormatCheck>false</DomentFormatCheck>
+  </PropertyGroup>
+</Project>
+XML
+  printf 'namespace Fmt;\npublic static class   Sample{ }\n' > src/Fmt/Sample.cs
+  dn build src/Fmt
+  expect_rc 1
+  expect_count 'error DOMENT031: Sample\.cs is not formatted' 1
+  dn build src/Fmt -p:DomentFormatCheck=false
+  expect_rc 0
+}
+
+CASES+=(format_batching)
+case_format_batching() {
+  local DN_FORMAT=() LOG i
+  format_setup
+  for i in $(seq -w 1 101); do
+    printf 'namespace Fmt;\n\npublic static class C%s\n{\n    public static int Value => 1;\n}\n' "$i" > "src/Fmt/C$i.cs"
+  done
+  printf 'namespace Fmt;\npublic static class   Zz{ }\n' > src/Fmt/Zz.cs
+  dn_log build src/Fmt
+  expect_rc 1
+  expect_count 'error DOMENT031: ' 1
+  expect_count 'error DOMENT031: Zz\.cs is not formatted; run dotnet csharpier format Zz\.cs( \[|$)' 1
+  local calls
+  calls=$(grep -Ec '^[[:space:]]*dotnet csharpier check ' <<<"$LOG" || true)
+  expect_eq "$calls" 2 "dotnet csharpier check command lines in the detailed log"
 }
 
 CASES+=(conventions_audit)

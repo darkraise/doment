@@ -1,0 +1,117 @@
+<Project>
+  <!-- Set after the project body, so only a global -p:DomentFormatCheck=false turns the check off. -->
+  <PropertyGroup>
+    <DomentFormatCheck>true</DomentFormatCheck>
+    <_DomentFormatStamp>$(IntermediateOutputPath)doment-format.stamp</_DomentFormatStamp>
+  </PropertyGroup>
+
+  <UsingTask TaskName="DomentFormatBatches"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <Size ParameterType="System.Int32" Required="true" />
+      <Batched ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        Batched = new ITaskItem[Files.Length];
+        for (int i = 0; i < Files.Length; i++)
+        {
+            var item = new TaskItem(Files[i]);
+            item.SetMetadata("DomentBatch", (i / Size).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Batched[i] = item;
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- CSharpier names each file it rejects on a line "Error <path> - <reason>". -->
+  <UsingTask TaskName="DomentFormatRejected"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Lines ParameterType="Microsoft.Build.Framework.ITaskItem[]" />
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var files = new List<ITaskItem>();
+        foreach (ITaskItem line in Lines ?? new ITaskItem[0])
+        {
+            Match m = Regex.Match(line.ItemSpec, @"^Error (?:\./)?(.+?) - ");
+            if (m.Success)
+            {
+                files.Add(new TaskItem(m.Groups[1].Value));
+            }
+        }
+        Files = files.ToArray();
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="_DomentFormatInputs">
+    <PropertyGroup>
+      <_DomentIntermediateDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(IntermediateOutputPath)'))</_DomentIntermediateDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_DomentFormatFile Include="@(Compile)"
+                         Condition="!$([System.String]::Copy('%(Compile.FullPath)').StartsWith('$(_DomentIntermediateDir)'))" />
+      <_DomentFormatFile Update="@(_DomentFormatFile)"
+                         DomentRelative="$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/', '%(FullPath)').Replace('\', '/'))" />
+      <_DomentFormatConfig Include="$(DomentRepoRoot).editorconfig" Condition="Exists('$(DomentRepoRoot).editorconfig')" />
+      <_DomentFormatConfig Include="$(DomentRepoRoot).csharpierrc" Condition="Exists('$(DomentRepoRoot).csharpierrc')" />
+      <_DomentFormatConfig Include="$(DomentRepoRoot).csharpierignore" Condition="Exists('$(DomentRepoRoot).csharpierignore')" />
+      <_DomentFormatConfig Include="$(DomentRepoRoot).config/dotnet-tools.json" Condition="Exists('$(DomentRepoRoot).config/dotnet-tools.json')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="DomentFormatCheck"
+          BeforeTargets="CoreCompile"
+          DependsOnTargets="_DomentFormatInputs"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(DomentFormatCheck)' == 'true'"
+          Inputs="@(_DomentFormatFile);@(_DomentFormatConfig)"
+          Outputs="$(_DomentFormatStamp)">
+    <Exec Command="dotnet csharpier --version"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_DomentCSharpierProbe" />
+    </Exec>
+    <Error Code="DOMENT032" Text="CSharpier is not restored; run dotnet tool restore" Condition="'$(_DomentCSharpierProbe)' != '0'" />
+
+    <DomentFormatBatches Files="@(_DomentFormatFile)" Size="100" Condition="'@(_DomentFormatFile)' != ''">
+      <Output TaskParameter="Batched" ItemName="_DomentFormatBatch" />
+    </DomentFormatBatches>
+    <Exec Command="dotnet csharpier check @(_DomentFormatBatch->'&quot;%(DomentRelative)&quot;', ' ')"
+          Condition="'%(_DomentFormatBatch.DomentBatch)' != ''"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          IgnoreStandardErrorWarningFormat="true"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="normal"
+          StandardErrorImportance="normal">
+      <Output TaskParameter="ConsoleOutput" ItemName="_DomentFormatOutput" />
+      <Output TaskParameter="ExitCode" ItemName="_DomentFormatExit" />
+    </Exec>
+
+    <DomentFormatRejected Lines="@(_DomentFormatOutput)">
+      <Output TaskParameter="Files" ItemName="_DomentUnformatted" />
+    </DomentFormatRejected>
+    <ItemGroup>
+      <_DomentFormatFailedCall Include="@(_DomentFormatExit)" Condition="'%(Identity)' != '0'" />
+    </ItemGroup>
+    <Error Code="DOMENT031"
+           Text="%(_DomentUnformatted.Identity) is not formatted; run dotnet csharpier format %(_DomentUnformatted.Identity)"
+           Condition="'@(_DomentUnformatted)' != ''"
+           ContinueOnError="ErrorAndContinue" />
+    <!-- A failed call that names no file (CSharpier itself failed) must not leave the stamp behind. -->
+    <Error Text="dotnet csharpier check failed in $(MSBuildProjectDirectory) without naming a file"
+           Condition="'@(_DomentUnformatted)' == '' and '@(_DomentFormatFailedCall)' != ''" />
+    <Touch Files="$(_DomentFormatStamp)" AlwaysCreate="true" Condition="'@(_DomentUnformatted)' == ''" />
+  </Target>
+</Project>

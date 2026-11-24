@@ -91,7 +91,7 @@ error_line_has() { # error_line_has <pattern>...: one error line matches every p
 # `dotnet build` appends -consoleloggerparameters:Summary after the caller's -clp:NoSummary (SDK 10.0.302 and
 # 10.0.404), so the console logger is replaced by one that is told NoSummary itself.
 DN_FLAGS=(-nologo -tl:off -clp:NoSummary -noConsoleLogger "-logger:ConsoleLogger,Microsoft.Build;NoSummary;Verbosity=minimal"
-  "-p:RestoreSources=$FEED" "-p:RestorePackagesPath=$PKGS")
+  "-p:RestoreSources=$FEED" "-p:RestorePackagesPath=$PKGS" -p:DomentFormatCheck=false)
 
 dn() { # dn <dir> <dotnet args...>; ENVV holds NAME=value pairs for this call
   local dir=$1

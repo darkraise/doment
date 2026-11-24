@@ -151,6 +151,13 @@ t_A10() {
   d=$(diff <(framework_editorconfig "$fw") \
     <(grep -v -E '^# doment:|^dotnet_diagnostic\.(IDE0161|IDE0028|IDE030[0-5])\.severity' "$ours") 2>&1)
   [[ -z $d ]] || note "the root .editorconfig differs from the framework's beyond the doment changes: $(head -n 12 <<<"$d")"
+
+  case_ csharpierrc
+  if [[ ! -f $REPO_ROOT/.csharpierrc ]]; then
+    note "no .csharpierrc at the repository root"
+    return 0
+  fi
+  eq "$(jq -S . "$REPO_ROOT/.csharpierrc" 2>&1)" "$(jq -S . "$REPO_ROOT/external/darkraise-framework/.csharpierrc" 2>&1)" ".csharpierrc"
 }
 
 t_A21() {
