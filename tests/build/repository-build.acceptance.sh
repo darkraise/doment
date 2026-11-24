@@ -128,6 +128,31 @@ t_A1() {
   eq "$(jq -r '.test.runner' "$g" 2>&1)" Microsoft.Testing.Platform "test.runner"
 }
 
+# The framework's .editorconfig as doment adopts it: without the DRUI020 line and the comment block directly above
+# it, and with LF line endings.
+framework_editorconfig() {
+  awk '
+    /^#/ { held = held $0 "\n"; next }
+    /^dotnet_diagnostic\.DRUI020\.severity/ { held = ""; next }
+    { printf "%s", held; held = ""; print }
+    END { printf "%s", held }
+  ' "$1" | sed 's/^end_of_line = crlf$/end_of_line = lf/'
+}
+
+t_A10() {
+  case_ editorconfig
+  local fw=$REPO_ROOT/external/darkraise-framework/.editorconfig ours=$REPO_ROOT/.editorconfig
+  [[ -f $fw ]] || die "no framework .editorconfig at $fw; run tools/framework.sh sync"
+  if [[ ! -f $ours ]]; then
+    note "no .editorconfig at the repository root"
+    return 0
+  fi
+  local d
+  d=$(diff <(framework_editorconfig "$fw") \
+    <(grep -v -E '^# doment:|^dotnet_diagnostic\.(IDE0161|IDE0028|IDE030[0-5])\.severity' "$ours") 2>&1)
+  [[ -z $d ]] || note "the root .editorconfig differs from the framework's beyond the doment changes: $(head -n 12 <<<"$d")"
+}
+
 t_A21() {
   case_ index
   OUT=$(git -C "$REPO_ROOT" ls-files --eol 2>&1) && RC=0 || RC=$?
@@ -153,6 +178,7 @@ t_A21() {
 
 TESTS=(
   "A1: the SDK on PATH is 10.0.404 or a later 10.0.4xx and global.json pins it with the testing platform|t_A1"
+  "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
   "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"
 )
 
