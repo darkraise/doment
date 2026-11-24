@@ -124,12 +124,12 @@ Rules:
   terminal host logic lives in `Doment.Worker`. The "Windows terminal host" epic may give it an executable of its own
   and records that here.
 - **Simulation never ships in a release binary.** An executable references `Doment.Simulation` only in a simulation
-  build (one build property, set by test, bench and harness builds); a release publish with that property set
-  fails. The walking skeleton's synthetic stream (R11) runs in such a build of the agent.
+  build (`DomentSimulation=true`, set by test, bench and harness builds, which build or publish in Debug); a publish
+  in any other configuration fails with DOMENT030 when that property is set or `Doment.Simulation` is among the
+  resolved references. The walking skeleton's synthetic stream (R11) runs in such a build of the agent.
 - Test projects sit beside the project they test, under `tests/`. The test bench and the measurement harness are
   build-only tools under `tools/`.
-- The "Repository, build and NativeAOT" epic creates the M1 projects. It may merge two of them if one stays empty
-  through M1, and records that change here.
+- The "Repository, build and NativeAOT" epic created the nine M1 projects and `Doment.Core.Tests`, and merged none.
 
 ## Platform seams and build order
 
@@ -223,9 +223,11 @@ Other properties set by the root `Directory.Build.props`, each only when it is e
 | `FrameworkPinStrict` | `false` | `true` turns DOMENT001 and DOMENT002 into errors |
 | `DomentRegisterFile` | `$(DomentRepoRoot)docs/third-party-exceptions.md` | The exception register |
 | `DomentBuildOnly` | `true` for a project under `tests/` or `tools/`, else `false` | Shipping or build-only |
+| `DomentAuditStrict` | `false` | `true` turns the NuGet audit warnings NU1901 to NU1904 into errors |
 
 The root build files also keep DOMENT001 and DOMENT002 out of "warnings as errors", so strict mode is the only thing
-that turns them into errors.
+that turns them into errors. `DomentPlatform`, `DomentSimulation` and `DomentFormatCheck` are set by the root
+`Directory.Build.targets` (see Repository and build).
 
 ### The pin
 
@@ -365,7 +367,12 @@ It prints every violation once, not only the first, then one summary line:
 gate: <p> projects checked, <k> packages seen, <v> violations
 ```
 
-It exits 0 when there is no violation, 1 when there is any, and 2 when `<tree>` is not a git work tree.
+It exits 0 when there is no violation, 1 when there is any, and 2 when `<tree>` is not a git work tree or its path
+holds one of `;`, `%`, `$`, `@`, `"`, `,`, `&` and `<`, which MSBuild cannot take in a path (`&` and `<` also break
+the inline build tasks, whose bodies MSBuild re-parses as XML after expanding the path into them). On `master` or
+`main` with a malformed pin or no framework worktree, the gate skips the ancestry check and leaves the report to the
+framework check, so each problem is reported once. `.gitattributes` makes every text file LF and marks the binary
+types above as not text.
 
 ### What the check cannot see
 
@@ -377,19 +384,83 @@ review enforce it.
 
 `tests/build/run.sh [<regex>]` proves the framework checks, `tools/framework.sh`, the register parser, the build
 check and the gate on stand-in repositories and generated fixture trees, with no network access.
+`tests/build/repository-build.acceptance.sh [<regex>]` proves the repository and build rules below on the real
+checkout and on stand-in trees under `artifacts/acceptance/`, with the user's normal NuGet sources.
+
+## Repository and build
+
+### Toolchain
+
+- `global.json` pins SDK 10.0.404 with `rollForward` `latestPatch` and selects Microsoft Testing Platform as the
+  test runner. SDK 10.0.404 is installed under `/usr/local/share/dotnet` and linked as `/usr/local/bin/dotnet`, which
+  every shell on the machine now resolves first; apt's 10.0.302 stays installed (its runtime 10.0.10 fails the
+  NativeAOT restore on GHSA-p3jp-9v83-76w9). Undo: remove `/usr/local/share/dotnet` and the link.
+- clang comes from apt (`apt remove clang` undoes it); no build file sets `CppCompilerAndLinker`.
+- `docs/dforge/research/2026-11-24-build-probes.md` records the probes the build mechanisms rest on.
+
+### Solution
+
+`doment.slnx` lists the projects of the Module map built so far, under `/src/`, and `tests/Doment.Core.Tests` under
+`/tests/`. Every project targets `net10.0`; the libraries set `IsAotCompatible`, and `Doment.Server` (`doment-server`),
+`Doment.Cli` (`doment`) and `Doment.Agent` (`doment-agent`) set `PublishAot` and `TrimmerSingleWarn=false`. The
+executables share `Doment.Core.StandardOptions` (`--version`, `--help`, usage with exit 2), and the version is
+`VersionPrefix` 0.1.0 in the root `Directory.Build.props`. `tests/Directory.Build.props` holds the test package
+versions (xUnit v3 4.0.2, Microsoft Testing Platform 2.5.1). Publish output goes to `artifacts/`, which git ignores.
+
+### Conventions
+
+`build/Doment.Conventions.props` sets nullable, implicit usings, the latest language, warnings as errors, the
+`latest-recommended` analysis level, code style in the build, and CA1416 as an error. The root `.editorconfig` is the
+framework's, without its `DRUI020` line, with LF line endings, and with IDE0161, IDE0028 and IDE0300 to IDE0305 at
+`warning`; each change carries a `# doment:` comment. Every build checks formatting with CSharpier 1.2.6
+(`.config/dotnet-tools.json`, `printWidth` 130 as the framework's `.csharpierrc`). doment and the framework move their
+CSharpier version together.
+
+### Build properties
+
+| Property | Set by | Values |
+|---|---|---|
+| `DomentPlatform` | `build/Doment.Platform.targets`, after the project body, from the Module map's Kind column | `portable`, `linux` (`Doment.Agent`, `Doment.Platform.Linux`) or `windows` (`Doment.Platform.Windows`, `Doment.Service`, `Doment.Session`, `Doment.App`); only a global property overrides it |
+| `DomentSimulation` | `build/Doment.Simulation.targets` | `false` by default; `true` gives `Doment.Cli` and `Doment.Agent` the `Doment.Simulation` reference and `DOMENT_SIMULATION` |
+| `DomentFormatCheck` | `build/Doment.Format.targets`, after the project body | `true`; only a global `false` turns the format check off |
+| `DomentAuditStrict` | `build/Doment.Conventions.props` | `false` by default, `true` in `build/check.sh` |
+
+A portable project cannot switch CA1416 off with `NoWarn`. Diagnostics:
+
+| Code | When |
+|---|---|
+| DOMENT030 | A publish in a configuration other than Debug with `DomentSimulation=true` or `Doment.Simulation` among the resolved references |
+| DOMENT031 | A compiled file is not formatted; one line per file |
+| DOMENT032 | CSharpier is not restored (`dotnet tool restore`) |
+| DOMENT033 | A portable project declares a native import, references `System.Runtime.InteropServices.NativeLibrary`, carries an assembly-level `SupportedOSPlatform`, or does not target `net10.0` |
+
+The assembly findings of DOMENT033 come from `build/Doment.PortableCheck.cs`, a reader of the output assembly's
+metadata tables in netstandard 2.0 code, because the inline task factory cannot reference
+`System.Reflection.Metadata`. A Windows-only call guarded by `OperatingSystem.IsWindows()`, an API .NET does not
+annotate, and `#pragma` or `SuppressMessage` suppressions pass these checks; review catches them.
+
+### `build/check.sh`
+
+```
+build/check.sh [<step>...]      steps: build, portable, aot, test; default: all four in this order
+```
+
+It checks the tree that holds it, found without git, with `-c Release -p:FrameworkPinStrict=true
+-p:DomentFormatCheck=true -p:DomentAuditStrict=true` on every call. `build` builds `doment.slnx`; `portable` builds
+each portable project for linux-x64 and win-x64 (win-x64 with `PublishAot=false`); `aot` publishes each `PublishAot`
+project to `artifacts/publish/<name>/linux-x64/`, fails on any warning line, and runs the binary with `--version`;
+`test` runs `dotnet test --solution doment.slnx`. It exports `DOTNET_ROOT` as the directory of the `dotnet` on PATH,
+runs each call in a process group of its own under a timeout (600 s, 1200 s for a publish, or
+`DOMENT_CHECK_TIMEOUT`), kills that group on expiry and on INT or TERM, and stops at the first failed step. It
+prints `check: <step> ok` or `check: <step> failed` with indented cause lines, and last
+`check: <n> steps run, <f> failed`; it exits 0, 1 on a failure, 2 on an unknown step.
 
 ## Rules handed to later epics
 
-### Repository, build and NativeAOT
-
-- Pin the .NET SDK in `global.json`: the framework compiles with warnings as errors at the latest analysis level, and
-  a newer SDK can break a pinned framework commit.
-- The SDK on the development machine (10.0.302) restores `Microsoft.DotNet.ILCompiler` 10.0.10, which NuGet audit
-  reports as GHSA-p3jp-9v83-76w9 (high); with warnings as errors the restore fails until the SDK is updated.
-- clang is not installed; the NativeAOT linker step works with `-p:CppCompilerAndLinker=gcc`.
-- Wire the simulation build property of the Module map.
-
 ### CI for pushed branches
+
+- Install the SDK from `global.json` (`actions/setup-dotnet` with `global-json-file`), have clang on the runner, run
+  `dotnet tool restore`, then `build/check.sh` and `build/gate.sh`.
 
 - Check out the framework at the pin into `external/darkraise-framework` with a read-only credential for the private
   repository, with LFS downloads skipped.
@@ -400,7 +471,10 @@ check and the gate on stand-in repositories and generated fixture trees, with no
 
 ### Gates declared
 
-- The exception-register gate is `build/gate.sh`; `tests/build/run.sh` is part of the tests gate.
+- The exception-register gate is `build/gate.sh`; `tests/build/run.sh` and
+  `tests/build/repository-build.acceptance.sh` are part of the tests gate.
+- The build, tests and NativeAOT gates are `build/check.sh build`, `test` and `aot`, with `portable` part of the
+  build gate.
 
 ### Device identity, pairing and encrypted sessions
 
@@ -430,6 +504,14 @@ check and the gate on stand-in repositories and generated fixture trees, with no
 - On Linux the gate still checks Windows-bound projects: it restores them with `EnableWindowsTargeting=true` passed
   as a global property and does not compile them. That the restore then succeeds on Linux is inference, verified in
   that epic.
+- A Windows-bound project gets `DomentPlatform=windows` from the list in `build/Doment.Platform.targets`; a new one
+  is added there.
+
+### Desktop app (M8)
+
+- Restore the framework's `DRUI020` editorconfig line when a project references `Darkraise.Win32UI.Generators`.
+- Choose install locations or names so that `doment.exe` and `Doment.exe`, one file name on Windows, never share a
+  directory.
 
 ### Windows terminal host (M7) and Installers and update (M11)
 
