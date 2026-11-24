@@ -382,6 +382,12 @@ case_sync_refuses() {
   expect_rc 1
   expect_out "^framework.sh: $T/darkraise-framework is the framework's primary checkout, not a worktree of it$"
   expect_eq "$(git -C "$T/darkraise-framework" branch --show-current)" master "framework primary checkout branch"
+
+  git init -q -b master "$T/unrelated"
+  git -C "$T/unrelated" commit -q --allow-empty -m "Unrelated"
+  DARKRAISE_FRAMEWORK_PATH=$T/unrelated fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: $T/unrelated is not a worktree of the framework clone $T/darkraise-framework$"
 }
 
 CASES+=(sync_fetches)
@@ -527,6 +533,21 @@ case_pin_unverifiable() {
   dn build src/App -p:FrameworkPinStrict=true
   expect_rc 1
   expect_count 'error DOMENT002: .* cannot be verified: not a git checkout$' 1
+}
+
+CASES+=(pin_git_missing)
+case_pin_git_missing() {
+  local root=$FIXTURE_RUN/pin_git_missing bin=$T/bin
+  fixture_project pin_git_missing src/App net10.0
+  mkdir -p "$bin"
+  ln -s "$(command -v dotnet)" "$bin/dotnet"
+  ln -s "$(command -v timeout)" "$bin/timeout"
+  PATH=$bin dn build "$root/src/App"
+  expect_rc 0
+  expect_count "warning DOMENT002: darkraise-framework at $DOMENT_FIXTURE_FRAMEWORK/? cannot be verified: git not found$" 1
+  PATH=$bin dn build "$root/src/App" -p:FrameworkPinStrict=true
+  expect_rc 1
+  expect_count "error DOMENT002: darkraise-framework at $DOMENT_FIXTURE_FRAMEWORK/? cannot be verified: git not found$" 1
 }
 
 CASES+=(pin_malformed)
@@ -689,7 +710,7 @@ case_release_refuses() {
     if [[ $expected == HEAD ]]; then
       expect_out "^framework.sh: $WT HEAD [0-9a-f]{40} is on no framework branch or remote-tracking ref$"
     else
-      expect_out "^framework.sh: $WT is not clean \(first: $expected\)$"
+      expect_out "^framework.sh: $WT is not clean \(first: ${expected//./\\.}\)$"
     fi
     [[ -f $WT/$ROW_FILE ]] || fail "$row: $ROW_FILE is gone after the refusal"
     [[ -f $WT/src/Darkraise/Class1.cs ]] || fail "$row: the worktree's files are gone after the refusal"
@@ -719,6 +740,9 @@ case_release_removes_clean() {
   fw_sh release
   expect_rc 0
   [[ ! -e $WT ]] || fail "the worktree detached at feature's commit still exists"
+  if git -C "$T/darkraise-framework" worktree list --porcelain | grep -qxF "worktree $WT"; then
+    fail "the clone still lists the worktree detached at feature's commit"
+  fi
   expect_eq "$(git -C "$T/darkraise-framework" branch --list feature --format='%(refname:short)')" feature "feature branch after release"
 
   fw_sh release
@@ -794,15 +818,15 @@ case_register_missing_file() {
   expect_count "error DOMENT013: $register: table 'Exceptions' is missing$" 1
 }
 
-# Packs Fx.Listed, Fx.Unlisted, Fx.Tool and Fx.Parent (which depends on Fx.Unlisted) into the
-# run feed, once per run.
+# Packs Fx.Listed, Fx.Unlisted, Fx.Tool, Fx.Parent (which depends on Fx.Unlisted), Fx.Wild.Core
+# and Fx.Platform into the run feed, once per run.
 pack_fixture_packages() {
   [[ -f $TROOT/packed ]] && return 0
   local src=$TROOT/packsrc id dep
   mkdir -p "$src"
   echo '<Project />' > "$src/Directory.Build.props"
   echo '<Project />' > "$src/Directory.Build.targets"
-  for id in Fx.Listed Fx.Unlisted Fx.Tool Fx.Parent; do
+  for id in Fx.Listed Fx.Unlisted Fx.Tool Fx.Parent Fx.Wild.Core Fx.Platform; do
     dep=
     [[ $id == Fx.Parent ]] && dep='<ItemGroup><PackageReference Include="Fx.Unlisted" Version="1.0.0" /></ItemGroup>'
     write_file "$src/$id/$id.csproj" <<XML
@@ -849,6 +873,25 @@ case_packages_listed() {
   expect_count 'DOMENT-PACKAGES: 1$' 1
 }
 
+CASES+=(packages_matching)
+case_packages_matching() {
+  local root=$FIXTURE_RUN/packages_matching
+  package_case packages_matching src/App net10.0 package=Fx.Wild.Core/1.0.0 package=Fx.Platform/1.0.0
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT010: .*package Fx.Wild.Core 1.0.0 is in no table" 1
+  expect_count "error DOMENT010: .*package Fx.Platform 1.0.0 is in no table" 1
+  # A lower-case wildcard row and an upper-case platform row: matching is by prefix and ignores case.
+  # shellcheck disable=SC2016
+  sed -i '/^| X1 |/a | X6 | Fx wild | `fx.wild.*` | Tests | Fixture | MIT | `IFixture` | None | 2026-11-24 |' "$root/register.md"
+  # shellcheck disable=SC2016
+  echo '| `FX.PLATFORM` | Fixture | 2026-11-24 |' >> "$root/register.md"
+  dn build "$root/src/App"
+  expect_rc 0
+  expect_no_out 'error DOMENT'
+  expect_count 'DOMENT-PACKAGES: 2$' 1
+}
+
 CASES+=(package_unlisted_direct)
 case_package_unlisted_direct() {
   package_case package_unlisted_direct src/App net10.0 package=Fx.Unlisted/1.0.0
@@ -870,6 +913,12 @@ case_package_unlisted_transitive() {
   dn build "$root/src/App2"
   expect_rc 1
   expect_count "error DOMENT010: $root/src/App2/App2.csproj: package Fx.Unlisted 1.0.0 is in no table of $root/register.md \(through project Lib\)$" 1
+  # App3 -> Mid -> Lib: the direct reference is Mid, although Lib comes first in the assets file.
+  fixture_project package_unlisted_transitive src/Mid net10.0 project=../Lib/Lib.csproj
+  fixture_project package_unlisted_transitive src/App3 net10.0 project=../Mid/Mid.csproj
+  dn build "$root/src/App3"
+  expect_rc 1
+  expect_count "error DOMENT010: $root/src/App3/App3.csproj: package Fx.Unlisted 1.0.0 is in no table of $root/register.md \(through project Mid\)$" 1
 }
 
 CASES+=(buildonly_package)
@@ -883,6 +932,12 @@ case_buildonly_package() {
   dn build "$root/tests/App.Tests"
   expect_rc 0
   expect_no_out 'error DOMENT'
+  # A shipping project cannot classify itself as build-only.
+  fixture_project buildonly_package src/Sneaky net10.0 package=Fx.Tool/1.0.0
+  sed -i 's|<TargetFramework>|<DomentBuildOnly>true</DomentBuildOnly><TargetFramework>|' "$root/src/Sneaky/Sneaky.csproj"
+  dn build "$root/src/Sneaky"
+  expect_rc 1
+  expect_count "error DOMENT011: $root/src/Sneaky/Sneaky.csproj ships but resolves build-and-test-only package Fx.Tool 1.0.0" 1
 }
 
 CASES+=(buildonly_project_ref)
@@ -1113,6 +1168,32 @@ case_gate_off_pin() {
   run_gate
   expect_rc 1
   expect_count "^error DOMENT001: darkraise-framework at $WT is at the pin $C1 but not clean, first: untracked.txt$" 1
+  # With no tracked project left, the framework check still runs.
+  git rm -q --cached src/C/C.csproj
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT001: darkraise-framework at $WT is at the pin $C1 but not clean, first: untracked.txt$" 1
+  expect_last 'gate: 0 projects checked, 0 packages seen, 1 violations'
+}
+
+CASES+=(gate_master_pin_file)
+case_gate_master_pin_file() {
+  gate_setup
+  echo not-a-pin > build/darkraise-framework.pin
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT006: $T/doment/build/darkraise-framework.pin must hold one full 40-character commit hash$" 1
+  echo "$C1" > build/darkraise-framework.pin
+  fw_sh release
+  expect_rc 0
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT003: darkraise-framework not found at $WT; run tools/framework.sh sync$" 1
+  printf '%s\r\n' "$C1" > build/darkraise-framework.pin
+  fw_sh sync
+  expect_rc 0
+  run_gate
+  expect_rc 0
 }
 
 CASES+=(gate_skips_fixtures)
