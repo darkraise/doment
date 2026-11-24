@@ -817,6 +817,18 @@ t_A28() {
 
 # ---------------------------------------------------------------------------
 
+declare -A DESC=(
+  [A1]="dotnet and global.json pin 10.0.404" [A2]="solution builds clean" [A3]="project references match section 3"
+  [A4]="NativeAOT publish and --version" [A5]="packs 10.0.14 or later, no audit finding" [A6]="trim-unsafe fixture fails the aot step"
+  [A7]="portable step builds nine projects for two runtimes" [A8]="CA1416 on an unguarded Registry call" [A9]="DOMENT033 findings"
+  [A10]="editorconfig and csharpierrc match the framework" [A11]="style and CA rules fail the build" [A12]="format check, stamp and design-time skip"
+  [A13]="DOMENT032 when the tool is not restored" [A14]="a project cannot switch the checks off" [A15]="simulation property adds the reference"
+  [A16]="DOMENT030 on a release publish" [A17]="tests under MTP and runtime 10.0.14 or later" [A18]="check.sh steps, failure and unknown step"
+  [A19]="no process left behind" [A20]="gate reports 0 violations" [A21]="LF line endings and attributes"
+  [A22]="gate prints DOMENT006 and DOMENT003 once" [A23]="gate path escaping and refusals" [A24]="gate skips ancestry and ls-files failures"
+  [A25]="existing build test scripts pass" [A27]="vulnerable package warns, check.sh fails" [A28]="DomentPlatform equals the module map Kind"
+)
+
 RESULT_FAIL=0
 RESULT_PASS=0
 for fn in $(declare -F | awk '{print $3}' | grep -E '^t_A[0-9]+$' | sort -t A -k2 -n); do
@@ -826,10 +838,10 @@ for fn in $(declare -F | awk '{print $3}' | grep -E '^t_A[0-9]+$' | sort -t A -k
   CASE=
   "$fn"
   if [[ ${#FAILS[@]} -eq 0 ]]; then
-    echo "ok   $n"
+    echo "ok   $n: ${DESC[$n]}"
     RESULT_PASS=$((RESULT_PASS + 1))
   else
-    echo "FAIL $n"
+    echo "FAIL $n: ${DESC[$n]}"
     printf '       %s\n' "${FAILS[@]}"
     RESULT_FAIL=$((RESULT_FAIL + 1))
   fi
