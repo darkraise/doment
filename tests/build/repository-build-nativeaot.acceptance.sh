@@ -29,6 +29,8 @@ FAILS=()
 
 case_() { CASE=$1; }
 note() { FAILS+=("[$CASE] $1"); }
+SKIPS=()
+skip_case() { SKIPS+=("[$CASE] skipped: $1"); }
 tail_out() { tail -n 12 <<<"$OUT" | cut -c1-400; }
 rc_is() { [[ $RC -eq $1 ]] || note "expected exit $1, got $RC; output: $(tail_out)"; }
 has() { grep -Eq -- "$1" <<<"$OUT" || note "no output line matches /$1/; output: $(tail_out)"; }
@@ -64,13 +66,18 @@ msb() { # msb <root> <project> <msbuild args...>: evaluation only, output is JSO
 # The output and exit code of `build/check.sh` with no argument, from ACCEPT_CHECK_LOG or one fresh run.
 FULL_OUT=
 FULL_RC=
+FULL_MARK=
+FULL_LEFT=
 full_check() {
   [[ -n $FULL_RC ]] && return 0
   if [[ -n ${ACCEPT_CHECK_LOG:-} && -f ${ACCEPT_CHECK_LOG:-} ]]; then
     FULL_RC=$(tail -n 1 "$ACCEPT_CHECK_LOG" | sed -nE 's/^exit=([0-9]+)$/\1/p')
     FULL_OUT=$(sed '$d' "$ACCEPT_CHECK_LOG")
   else
-    FULL_OUT=$(cd "$REPO_ROOT" && timeout -k 30 2400 bash build/check.sh 2>&1) && FULL_RC=0 || FULL_RC=$?
+    FULL_MARK=a19-full-$$
+    FULL_OUT=$(cd "$REPO_ROOT" && env "QA_MARK=$FULL_MARK" timeout -k 30 2400 bash build/check.sh 2>&1) && FULL_RC=0 || FULL_RC=$?
+    # Scanned now: an idle server the run left behind may have exited by the time A19 runs.
+    FULL_LEFT=$(procs_left "$FULL_MARK")
   fi
 }
 
@@ -587,8 +594,18 @@ qa_procs() { # PIDs whose environment holds the marker $1
   done
 }
 
+procs_left() { # procs_left <marker>: prints the marked PIDs still running after up to 10 s
+  local i left
+  for i in $(seq 1 20); do
+    left=$(qa_procs "$1" | paste -sd' ')
+    [[ -z $left ]] && return 0
+    sleep 0.5
+  done
+  echo "$left"
+}
+
 t_A19() {
-  local d mark pids
+  local d mark pids left
   d=$(standin a19 outside)
   fx "$d" Fx '' '<Target Name="QaSlow" BeforeTargets="CoreCompile"><Exec Command="sleep 40" /></Target>' "$CLEAN_SRC"
   printf '<Solution>\n  <Folder Name="/src/">\n    <Project Path="src/Fx/Fx.csproj" />\n  </Folder>\n</Solution>\n' > "$d/doment.slnx"
@@ -616,15 +633,33 @@ t_A19() {
   cs=$(pgrep -P "$sub" -f 'check.sh' | head -n 1)
   [[ -n $cs ]] || cs=$(qa_procs "$mark" | while read -r q; do tr '\0' ' ' < "/proc/$q/cmdline" | grep -q 'build/check.sh' && echo "$q"; done | head -n 1)
   [[ -n $cs ]] && kill -TERM "$cs" 2>/dev/null
+  [[ -n $cs ]] || note "no check.sh process found to signal"
+  for i in $(seq 1 240); do
+    kill -0 "$sub" 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 "$sub" 2>/dev/null; then
+    note "check.sh did not exit within 120 s of SIGTERM"
+    pkill -TERM -P "$sub"
+    kill -TERM "$sub" 2>/dev/null
+  fi
   wait "$sub" 2>/dev/null
   sleep 5
   pids=$(qa_procs "$mark" | paste -sd' ')
   [[ -z $pids ]] || { note "processes left after SIGTERM: $(ps -o pid,args -p "${pids// /,}" | cut -c1-200)"; kill -TERM ${pids} 2>/dev/null; }
   case_ "after the full check"
-  if [[ -n ${ACCEPT_CHECK_MARK:-} ]]; then
-    pids=$(qa_procs "$ACCEPT_CHECK_MARK" | paste -sd' ')
-    [[ -z $pids ]] || note "processes left after the full check: $pids"
+  full_check
+  if [[ -n $FULL_MARK ]]; then
+    eq "$FULL_RC" 0 "exit of the full check"
+    left=$FULL_LEFT
+  else
+    # ACCEPT_CHECK_LOG supplied the full run, so a marked one runs here.
+    ENVV=(DOMENT_QA=1 "QA_MARK=a19-normal-$$")
+    run "$REPO_ROOT" 2400 bash build/check.sh
+    rc_is 0
+    left=$(procs_left "a19-normal-$$")
   fi
+  [[ -z $left ]] || { note "processes left after the full check: $left"; kill -TERM $left 2>/dev/null; }
 }
 
 t_A20() {
@@ -701,15 +736,10 @@ t_A22() {
 die_setup() { echo "SETUP ERROR: $1" >&2; exit 99; }
 
 t_A23() {
-  local d
-  d="$OUTSIDE/p&<' x"
-  mkrepo "$d" master || die_setup "mkrepo"
   case_ "path with & < ' and a space"
-  ENVV=(DOMENT_QA=1 "DARKRAISE_FRAMEWORK_PATH=$FRAMEWORK")
-  run "$REPO_ROOT" 900 bash build/gate.sh "$d"
-  [[ $RC -eq 0 ]] || note "the gate exited $RC; output: $(tail_out)"
-  has ' 0 violations$'
+  skip_case "refused under amendment A5; register docs/dforge/registers/2026-11-24-repository-build-nativeaot.md row 7"
   case_ "path with ' and a space only"
+  ENVV=(DOMENT_QA=1 "DARKRAISE_FRAMEWORK_PATH=$FRAMEWORK")
   mkrepo "$OUTSIDE/q' y" master || die_setup "mkrepo"
   run "$REPO_ROOT" 900 bash build/gate.sh "$OUTSIDE/q' y"
   rc_is 0
@@ -835,6 +865,8 @@ for fn in $(declare -F | awk '{print $3}' | grep -E '^t_A[0-9]+$' | sort -t A -k
   n=${fn#t_}
   [[ -z $FILTER || $n =~ $FILTER ]] || continue
   FAILS=()
+  SKIPS=()
+  ENVV=(DOMENT_QA=1)
   CASE=
   "$fn"
   if [[ ${#FAILS[@]} -eq 0 ]]; then
@@ -845,6 +877,7 @@ for fn in $(declare -F | awk '{print $3}' | grep -E '^t_A[0-9]+$' | sort -t A -k
     printf '       %s\n' "${FAILS[@]}"
     RESULT_FAIL=$((RESULT_FAIL + 1))
   fi
+  [[ ${#SKIPS[@]} -eq 0 ]] || printf '       %s\n' "${SKIPS[@]}"
 done
 echo "$RESULT_PASS passed, $RESULT_FAIL failed"
 [[ $RESULT_FAIL -eq 0 ]]

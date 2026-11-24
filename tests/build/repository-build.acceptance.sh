@@ -328,6 +328,29 @@ t_aot_step() {
   has '^    no project in .*/doment\.slnx sets PublishAot$'
 }
 
+t_portable_step() {
+  case_ "a solution with no portable project fails the portable step"
+  local d
+  d=$(standin portable-none)
+  mkdir -p "$d/src/Doment.Agent"
+  printf '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n' \
+    > "$d/src/Doment.Agent/Doment.Agent.csproj"
+  printf '<Solution>\n  <Folder Name="/src/">\n    <Project Path="src/Doment.Agent/Doment.Agent.csproj" />\n  </Folder>\n</Solution>\n' \
+    > "$d/doment.slnx"
+  standin_check "$d" portable
+  rc_is 1
+  has '^check: portable failed$'
+  has '^    no project in .*/doment\.slnx is portable$'
+
+  case_ "a solution with no project fails the portable step"
+  d=$(standin portable-empty)
+  printf '<Solution>\n</Solution>\n' > "$d/doment.slnx"
+  standin_check "$d" portable
+  rc_is 1
+  has '^check: portable failed$'
+  has '^    dotnet sln list named no project in .*/doment\.slnx$'
+}
+
 t_A7() {
   case_ "check.sh portable"
   [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
@@ -648,6 +671,7 @@ TESTS=(
   "A5: the executables restore NativeAOT packages of 10.0.14 or later and the restore has no audit finding|t_A5"
   "A6: a trim warning fails the aot step, and the warning pattern matches ILC's form|t_A6"
   "aot step: a wrong --version and a solution with no NativeAOT project each fail it|t_aot_step"
+  "portable step: a solution with no portable project, and one dotnet sln list names no project, each fail it|t_portable_step"
   "A7: build/check.sh portable builds every portable project for linux-x64 and win-x64|t_A7"
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
   "A15: DomentSimulation=true gives Doment.Cli and Doment.Agent the simulation reference and constant|t_A15"
