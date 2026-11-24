@@ -38,7 +38,7 @@ resolve_paths() {
   primary=$(dirname "$common")
 
   if [[ -n ${DARKRAISE_FRAMEWORK_PATH:-} ]]; then
-    [[ $DARKRAISE_FRAMEWORK_PATH == /* ]] ||
+    is_absolute "$DARKRAISE_FRAMEWORK_PATH" ||
       die "DARKRAISE_FRAMEWORK_PATH must be an absolute path, got '$DARKRAISE_FRAMEWORK_PATH'"
     WORKTREE=${DARKRAISE_FRAMEWORK_PATH%/}
   else
@@ -47,19 +47,28 @@ resolve_paths() {
 
   local default_clone
   default_clone=$(dirname "$primary")/darkraise-framework
-  CLONE=
-  if [[ -n ${DARKRAISE_FRAMEWORK_REPO:-} ]] && is_repo "$DARKRAISE_FRAMEWORK_REPO"; then
+  if [[ -n ${DARKRAISE_FRAMEWORK_REPO:-} ]]; then
     CLONE=$DARKRAISE_FRAMEWORK_REPO
-  elif is_repo "$default_clone"; then
-    if [[ -n ${DARKRAISE_FRAMEWORK_REPO:-} ]]; then
-      echo "framework.sh: no darkraise-framework clone at $DARKRAISE_FRAMEWORK_REPO; using $default_clone" >&2
-    fi
-    CLONE=$default_clone
   else
+    CLONE=$default_clone
+  fi
+  if ! is_repo "$CLONE"; then
+    if [[ -n ${DARKRAISE_FRAMEWORK_REPO:-} ]] && is_repo "$default_clone"; then
+      die "no darkraise-framework clone at $DARKRAISE_FRAMEWORK_REPO (DARKRAISE_FRAMEWORK_REPO); unset it to use $default_clone"
+    fi
     die "no darkraise-framework clone at ${DARKRAISE_FRAMEWORK_REPO:-(unset)} or $default_clone"
   fi
   CLONE=$(real_dir "$CLONE")
   PIN_FILE=$TOPLEVEL/build/darkraise-framework.pin
+}
+
+# A drive-letter or UNC path is absolute only under a Windows shell (Git Bash, MSYS, Cygwin).
+is_absolute() {
+  [[ $1 == /* ]] && return 0
+  case ${OSTYPE:-} in
+    msys* | cygwin* | win32*) [[ $1 == [A-Za-z]:[/\\]* || $1 == \\\\* ]] ;;
+    *) return 1 ;;
+  esac
 }
 
 is_repo() {
@@ -90,12 +99,15 @@ check_is_framework_worktree() {
     die "$WORKTREE is the framework's primary checkout, not a worktree of it"
 }
 
-# Prints the first path that makes the worktree not clean (Global Constraints), or nothing.
+# Sets FIRST_UNCLEAN to the first path that makes the worktree not clean (Global Constraints),
+# or to the empty string. Called directly, not in $(...), so a git failure stops the script.
 first_unclean_path() {
   local status_file entry code path segment skip_next=0
+  FIRST_UNCLEAN=
   status_file=$(mktemp)
   TMP_FILES+=("$status_file")
-  git -C "$WORKTREE" status --porcelain=v1 -z --ignored=matching --untracked-files=all > "$status_file"
+  git -C "$WORKTREE" status --porcelain=v1 -z --ignored=matching --untracked-files=all > "$status_file" ||
+    die "git status failed in $WORKTREE"
   while IFS= read -r -d '' entry; do
     if ((skip_next)); then
       skip_next=0
@@ -114,15 +126,14 @@ first_unclean_path() {
       done
       ((allowed)) && continue
     fi
-    printf '%s\n' "$path"
+    FIRST_UNCLEAN=$path
     return 0
   done < "$status_file"
 }
 
 check_clean() {
-  local first
-  first=$(first_unclean_path)
-  [[ -z $first ]] || die "$WORKTREE is not clean (first: $first)"
+  first_unclean_path
+  [[ -z $FIRST_UNCLEAN ]] || die "$WORKTREE is not clean (first: $FIRST_UNCLEAN)"
 }
 
 check_reachable() {

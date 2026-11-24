@@ -295,6 +295,22 @@ case_sync_refuses() {
   [[ -f $WT/docs/dforge/note.md ]] || fail "the ignored file was removed"
   rm -rf "$WT/docs"
 
+  local index
+  index=$(git -C "$WT" rev-parse --path-format=absolute --git-path index)
+  cp "$index" "$T/index.saved"
+  echo garbage > "$index"
+  fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: git status failed in $WT$"
+  expect_no_out "is at $c2"
+  cp "$T/index.saved" "$index"
+  expect_eq "$(git -C "$WT" rev-parse HEAD)" "$C1" "HEAD after a failing git status"
+
+  DARKRAISE_FRAMEWORK_PATH=fw fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: DARKRAISE_FRAMEWORK_PATH must be an absolute path, got 'fw'$"
+  [[ ! -e fw ]] || fail "a relative framework path was created"
+
   mkdir -p "$WT/src/Darkraise/obj"
   echo x > "$WT/src/Darkraise/obj/x"
   fw_sh sync
@@ -349,6 +365,12 @@ case_sync_no_clone() {
   expect_rc 1
   expect_out "^framework.sh: no darkraise-framework clone at $T/none or $T/darkraise-framework$"
   [[ ! -e external/darkraise-framework ]] || fail "a framework worktree was created"
+
+  new_framework_repo "$T/darkraise-framework" >/dev/null
+  DARKRAISE_FRAMEWORK_REPO=$T/none fw_sh sync
+  expect_rc 1
+  expect_out "^framework.sh: no darkraise-framework clone at $T/none \(DARKRAISE_FRAMEWORK_REPO\); unset it to use $T/darkraise-framework$"
+  [[ ! -e external/darkraise-framework ]] || fail "the default clone was used although DARKRAISE_FRAMEWORK_REPO is set"
 }
 
 CASES+=(sync_linked_worktree)
