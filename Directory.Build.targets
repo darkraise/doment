@@ -4,4 +4,5 @@
   </PropertyGroup>
 
   <Import Project="$(MSBuildThisFileDirectory)build/Doment.Framework.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)build/Doment.ThirdParty.targets" />
 </Project>

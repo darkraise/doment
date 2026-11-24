@@ -15,7 +15,9 @@ export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 unset DARKRAISE_FRAMEWORK_PATH DARKRAISE_FRAMEWORK_REPO
 
 TROOT=$(mktemp -d "${TMPDIR:-/tmp}/doment-build-tests.XXXXXX")
-trap 'rm -rf "$TROOT"' EXIT
+FIXTURE_RUN=$REPO_ROOT/tests/build/fixtures/.run
+rm -rf "$FIXTURE_RUN"
+trap 'rm -rf "$TROOT" "$FIXTURE_RUN"' EXIT
 FEED=$TROOT/feed
 mkdir -p "$FEED" "$TROOT/pkgs"
 
@@ -156,6 +158,47 @@ System.Console.WriteLine(Darkraise.Class1.Name);
 CS
   git -C "$dir" add -A
   git -C "$dir" commit -qm "Initial doment"
+}
+
+# The stand-in framework every fixture case builds against, at its own pin, so the framework
+# check passes silently there.
+export DOMENT_FIXTURE_FRAMEWORK=$TROOT/fixture-framework
+DOMENT_FIXTURE_PIN=$(new_framework_repo "$DOMENT_FIXTURE_FRAMEWORK")
+export DOMENT_FIXTURE_PIN
+export DOMENT_FIXTURE_PIN_FILE=$TROOT/fixture-framework.pin
+printf '%s\n' "$DOMENT_FIXTURE_PIN" > "$DOMENT_FIXTURE_PIN_FILE"
+
+# fixture_project <case> <relative dir> <target framework> [package=<id>/<version> | project=<path>]...
+# Writes <dir>/<name>.csproj under tests/build/fixtures/.run/<case>/, whose register.md starts as a
+# copy of register-valid/register.md.
+fixture_project() {
+  local name=$1 dir=$2 tfm=$3 spec items=
+  shift 3
+  local root=$FIXTURE_RUN/$name
+  mkdir -p "$root"
+  [[ -f $root/register.md ]] || cp "$REPO_ROOT/tests/build/fixtures/register-valid/register.md" "$root/register.md"
+  for spec in "$@"; do
+    case $spec in
+      package=*)
+        spec=${spec#package=}
+        items+="    <PackageReference Include=\"${spec%%/*}\" Version=\"${spec#*/}\" />"$'\n'
+        ;;
+      project=*) items+="    <ProjectReference Include=\"${spec#project=}\" />"$'\n' ;;
+      *) echo "fixture_project: bad spec '$spec'" >&2; return 1 ;;
+    esac
+  done
+  # EnableWindowsTargeting makes restore ask for Microsoft.WindowsDesktop.App.Ref even for net10.0.
+  local windows=
+  [[ $tfm == *-windows* ]] && windows=$'\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>'
+  write_file "$root/$dir/$(basename "$dir").csproj" <<XML
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$tfm</TargetFramework>$windows
+  </PropertyGroup>
+  <ItemGroup>
+$items  </ItemGroup>
+</Project>
+XML
 }
 
 # ---------------------------------------------------------------------------
@@ -575,7 +618,8 @@ case_real_framework_strict() {
 XML
   cd "$T/real"
   dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
-    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages"
+    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" \
+    "-p:DomentRegisterFile=$REPO_ROOT/tests/build/fixtures/register-valid/register.md"
   expect_rc 0
   expect_no_out 'DOMENT'
   local packages
@@ -583,7 +627,8 @@ XML
   # Control: the same build against another pin fails, so the check did run on the real framework.
   printf '%040d\n' 0 > "$T/other.pin"
   dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
-    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" "-p:DomentFrameworkPinFile=$T/other.pin"
+    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" "-p:DomentFrameworkPinFile=$T/other.pin" \
+    "-p:DomentRegisterFile=$REPO_ROOT/tests/build/fixtures/register-valid/register.md"
   expect_rc 1
   expect_count "error DOMENT001: darkraise-framework at $fw is at [0-9a-f]{40}, but the pin is 0{40}$" 1
   echo "note real_framework_strict: packages: ${packages:-none}"
@@ -681,6 +726,74 @@ case_release_removes_clean() {
   fw_sh release
   expect_rc 0
   expect_out "^framework.sh: no framework worktree at $WT$"
+}
+
+CASES+=(register_valid)
+case_register_valid() {
+  fixture_project register_valid src/App net10.0
+  dn build "$FIXTURE_RUN/register_valid/src/App"
+  expect_rc 0
+  expect_no_out 'DOMENT013'
+}
+
+# Drops the column named $2 from every table row in the section headed "## $1".
+drop_column() {
+  awk -v heading="## $1" -v column="$2" -F'|' -v OFS='|' '
+    /^## / { inside = ($0 == heading); drop = 0 }
+    inside && /^\|/ {
+      if (!drop) { for (i = 1; i <= NF; i++) { cell = $i; gsub(/^ +| +$/, "", cell); if (cell == column) drop = i } }
+      if (drop) { line = ""; for (i = 1; i <= NF; i++) if (i != drop) line = line (line == "" && i == 1 ? "" : "|") $i; $0 = line }
+    }
+    { print }
+  ' "$3" > "$3.tmp" && mv "$3.tmp" "$3"
+}
+
+# Empties the cell of row $1 in the column named $2 (the row's table header gives the position).
+empty_cell() {
+  awk -v id="$1" -v column="$2" -F'|' -v OFS='|' '
+    /^\|/ && !header_seen { for (i = 1; i <= NF; i++) { cell = $i; gsub(/^ +| +$/, "", cell); if (cell == column) pos = i } header_seen = 1 }
+    /^## / { header_seen = 0 }
+    { cell = $2; gsub(/^ +| +$/, "", cell) }
+    /^\|/ && cell == id && pos { $pos = " " }
+    { print }
+  ' "$3" > "$3.tmp" && mv "$3.tmp" "$3"
+}
+
+malformed_row() {
+  local name=$1 expected=$2
+  shift 2
+  fixture_project "$name" src/App net10.0
+  local register=$FIXTURE_RUN/$name/register.md
+  "$@" "$register"
+  dn build "$FIXTURE_RUN/$name/src/App"
+  expect_rc 1
+  expect_count "error DOMENT013: $register: $expected$" 1
+  expect_count 'error DOMENT013' 1
+}
+
+remove_platform_heading() { sed -i '/^## Platform packages$/d' "$1"; }
+rename_b2() { sed -i 's/^| B2 |/| B1 |/' "$1"; }
+
+CASES+=(register_malformed)
+case_register_malformed() {
+  malformed_row malformed_heading "table 'Platform packages' is missing" remove_platform_heading
+  malformed_row malformed_column "table 'Build-and-test-only tools' has no column 'Licence'" \
+    drop_column 'Build-and-test-only tools' Licence
+  malformed_row malformed_duplicate "duplicate ID B1" rename_b2
+  local column
+  for column in Reason Licence Behind Replacement Approved; do
+    malformed_row "malformed_empty_$column" "row X1, column '$column' is empty" empty_cell X1 "$column"
+  done
+}
+
+CASES+=(register_missing_file)
+case_register_missing_file() {
+  fixture_project register_missing_file src/App net10.0
+  rm "$FIXTURE_RUN/register_missing_file/register.md"
+  local register=$FIXTURE_RUN/register_missing_file/src/App/register.md
+  dn build "$FIXTURE_RUN/register_missing_file/src/App"
+  expect_rc 1
+  expect_count "error DOMENT013: $register: table 'Exceptions' is missing$" 1
 }
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,13 @@
+<Project>
+  <!-- Generated cases live under .run/<case>/; each case's register.md marks its root. -->
+  <PropertyGroup>
+    <_DomentFixtureRoot>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildProjectDirectory)', 'register.md'))</_DomentFixtureRoot>
+    <DomentRepoRoot Condition="'$(_DomentFixtureRoot)' != ''">$(_DomentFixtureRoot)/</DomentRepoRoot>
+    <DomentRepoRoot Condition="'$(_DomentFixtureRoot)' == ''">$(MSBuildProjectDirectory)/</DomentRepoRoot>
+    <DomentRegisterFile>$(DomentRepoRoot)register.md</DomentRegisterFile>
+    <DarkraiseFrameworkPath>$(DOMENT_FIXTURE_FRAMEWORK)</DarkraiseFrameworkPath>
+    <DomentFrameworkPinFile>$(DOMENT_FIXTURE_PIN_FILE)</DomentFrameworkPinFile>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../../Directory.Build.props" />
+</Project>

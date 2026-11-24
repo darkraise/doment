@@ -1,0 +1,13 @@
+<Project>
+  <UsingTask TaskName="DomentThirdPartyCheck"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)Doment.BuildChecks.cs" />
+    </Task>
+  </UsingTask>
+
+  <Target Name="DomentThirdPartyCheck" AfterTargets="ResolvePackageAssets">
+    <DomentThirdPartyCheck RegisterFile="$(DomentRegisterFile)" />
+  </Target>
+</Project>
