@@ -219,6 +219,12 @@ public class DomentThirdPartyCheck : Task
     [Required]
     public string RegisterFile { get; set; }
 
+    public string ProjectAssetsFile { get; set; }
+
+    public string ProjectPath { get; set; }
+
+    public bool BuildOnly { get; set; }
+
     public override bool Execute()
     {
         DomentRegister register = DomentRegister.Load(RegisterFile);
@@ -226,7 +232,464 @@ public class DomentThirdPartyCheck : Task
         {
             Log.LogError(null, "DOMENT013", null, null, 0, 0, 0, 0, "{0}: {1}", RegisterFile, problem);
         }
+        if (string.IsNullOrEmpty(ProjectAssetsFile) || !File.Exists(ProjectAssetsFile))
+        {
+            return !Log.HasLoggedErrors;
+        }
+
+        DomentAssets assets = DomentAssets.Load(ProjectAssetsFile);
+        foreach (KeyValuePair<string, string> package in assets.Packages)
+        {
+            string id = package.Key;
+            string version = package.Value;
+            if (register.Exceptions.Exists(row => row.Matches(id)) || register.Platform.Exists(row => row.Matches(id)))
+            {
+                continue;
+            }
+            DomentRegisterRow tool = register.Tools.Find(row => row.Matches(id));
+            if (tool == null)
+            {
+                Log.LogError(null, "DOMENT010", null, null, 0, 0, 0, 0,
+                    "{0}: package {1} {2} is in no table of {3} ({4})", ProjectPath, id, version, RegisterFile, assets.HowArrived(id));
+            }
+            else if (!BuildOnly)
+            {
+                Log.LogError(null, "DOMENT011", null, null, 0, 0, 0, 0,
+                    "{0} ships but resolves build-and-test-only package {1} {2}, row {3} of {4} ({5})",
+                    ProjectPath, id, version, tool.Id, RegisterFile, assets.HowArrived(id));
+            }
+        }
+        Log.LogMessage(MessageImportance.High, "DOMENT-PACKAGES: {0}", assets.Packages.Count);
         return !Log.HasLoggedErrors;
+    }
+}
+
+public class DomentReferenceCheck : Task
+{
+    public ITaskItem[] References { get; set; }
+
+    [Required]
+    public string FrameworkPath { get; set; }
+
+    [Required]
+    public string RepoRoot { get; set; }
+
+    public string TargetFramework { get; set; }
+
+    public bool BuildOnly { get; set; }
+
+    public string ProjectPath { get; set; }
+
+    private static readonly StringComparison PathComparison =
+        Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    public override bool Execute()
+    {
+        string framework = AsDirectory(FrameworkPath);
+        string repo = AsDirectory(RepoRoot);
+        bool windows = (TargetFramework ?? "").StartsWith("net10.0-windows", StringComparison.OrdinalIgnoreCase);
+        foreach (ITaskItem reference in References ?? new ITaskItem[0])
+        {
+            string full = Normalize(reference.GetMetadata("FullPath"));
+            if (full.StartsWith(framework, PathComparison))
+            {
+                string relative = full.Substring(framework.Length);
+                bool allowed = Same(relative, "src/Darkraise/Darkraise.csproj")
+                    || (windows && (Same(relative, "src/Darkraise.Win32UI/Darkraise.Win32UI.csproj")
+                        || Same(relative, "src/Darkraise.Win32UI.Generators/Darkraise.Win32UI.Generators.csproj")));
+                if (!allowed)
+                {
+                    NotAllowed(full);
+                }
+            }
+            else if (!full.StartsWith(repo, PathComparison))
+            {
+                NotAllowed(full);
+            }
+            else
+            {
+                string relative = full.Substring(repo.Length);
+                bool buildOnlyTarget = relative.StartsWith("tests/", PathComparison) || relative.StartsWith("tools/", PathComparison);
+                if (buildOnlyTarget && !BuildOnly)
+                {
+                    Log.LogError(null, "DOMENT011", null, null, 0, 0, 0, 0,
+                        "{0} ships but references build-only project {1}", ProjectPath, full);
+                }
+            }
+        }
+        return !Log.HasLoggedErrors;
+    }
+
+    private void NotAllowed(string full)
+    {
+        Log.LogError(null, "DOMENT012", null, null, 0, 0, 0, 0,
+            "{0}: project reference {1} is not an allowed darkraise-framework project", ProjectPath, full);
+    }
+
+    private static bool Same(string a, string b)
+    {
+        return string.Equals(a, b, PathComparison);
+    }
+
+    private static string Normalize(string path)
+    {
+        return Path.GetFullPath(path).Replace('\\', '/');
+    }
+
+    private static string AsDirectory(string path)
+    {
+        string full = Normalize(path);
+        return full.EndsWith("/", StringComparison.Ordinal) ? full : full + "/";
+    }
+}
+
+// The parts of obj/project.assets.json the third-party check reads.
+public sealed class DomentAssets
+{
+    // Package ID to version, in the order of the assets file's libraries.
+    public readonly List<KeyValuePair<string, string>> Packages = new List<KeyValuePair<string, string>>();
+
+    private readonly List<string> directPackages = new List<string>();
+    private readonly List<string> directProjects = new List<string>();
+    private readonly Dictionary<string, List<string>> dependencies =
+        new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+    public static DomentAssets Load(string path)
+    {
+        var assets = new DomentAssets();
+        var root = DomentJson.Parse(File.ReadAllText(path)) as DomentJson.Obj;
+        if (root == null)
+        {
+            return assets;
+        }
+        var packageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var libraries = root.Get("libraries") as DomentJson.Obj;
+        if (libraries != null)
+        {
+            foreach (KeyValuePair<string, object> library in libraries.Members)
+            {
+                var body = library.Value as DomentJson.Obj;
+                string type = body == null ? null : body.Get("type") as string;
+                string id = IdOf(library.Key);
+                if (type == "package" && packageIds.Add(id))
+                {
+                    assets.Packages.Add(new KeyValuePair<string, string>(id, VersionOf(library.Key)));
+                }
+                else if (type == "project")
+                {
+                    assets.directProjects.Add(id);
+                }
+            }
+        }
+        var project = root.Get("project") as DomentJson.Obj;
+        var frameworks = project == null ? null : project.Get("frameworks") as DomentJson.Obj;
+        if (frameworks != null)
+        {
+            foreach (KeyValuePair<string, object> framework in frameworks.Members)
+            {
+                var body = framework.Value as DomentJson.Obj;
+                var direct = body == null ? null : body.Get("dependencies") as DomentJson.Obj;
+                if (direct == null)
+                {
+                    continue;
+                }
+                foreach (KeyValuePair<string, object> dependency in direct.Members)
+                {
+                    if (!assets.directPackages.Exists(id => string.Equals(id, dependency.Key, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        assets.directPackages.Add(dependency.Key);
+                    }
+                }
+            }
+        }
+        var targets = root.Get("targets") as DomentJson.Obj;
+        if (targets != null)
+        {
+            foreach (KeyValuePair<string, object> target in targets.Members)
+            {
+                var entries = target.Value as DomentJson.Obj;
+                if (entries == null)
+                {
+                    continue;
+                }
+                foreach (KeyValuePair<string, object> entry in entries.Members)
+                {
+                    var body = entry.Value as DomentJson.Obj;
+                    var deps = body == null ? null : body.Get("dependencies") as DomentJson.Obj;
+                    List<string> list;
+                    string id = IdOf(entry.Key);
+                    if (!assets.dependencies.TryGetValue(id, out list))
+                    {
+                        list = new List<string>();
+                        assets.dependencies[id] = list;
+                    }
+                    if (deps != null)
+                    {
+                        foreach (KeyValuePair<string, object> dep in deps.Members)
+                        {
+                            list.Add(dep.Key);
+                        }
+                    }
+                }
+            }
+        }
+        return assets;
+    }
+
+    // "direct reference", "through <direct package id>" or "through project <project name>":
+    // the first direct reference, in the order of the assets file, whose closure holds the package.
+    public string HowArrived(string id)
+    {
+        if (directPackages.Exists(direct => string.Equals(direct, id, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "direct reference";
+        }
+        foreach (string direct in directPackages)
+        {
+            if (Reaches(direct, id))
+            {
+                return "through " + direct;
+            }
+        }
+        foreach (string directProject in directProjects)
+        {
+            if (Reaches(directProject, id))
+            {
+                return "through project " + directProject;
+            }
+        }
+        return "direct reference";
+    }
+
+    private bool Reaches(string from, string id)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { from };
+        var queue = new Queue<string>();
+        queue.Enqueue(from);
+        while (queue.Count > 0)
+        {
+            List<string> next;
+            if (!dependencies.TryGetValue(queue.Dequeue(), out next))
+            {
+                continue;
+            }
+            foreach (string dependency in next)
+            {
+                if (string.Equals(dependency, id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (seen.Add(dependency))
+                {
+                    queue.Enqueue(dependency);
+                }
+            }
+        }
+        return false;
+    }
+
+    private static string IdOf(string key)
+    {
+        int slash = key.IndexOf('/');
+        return slash < 0 ? key : key.Substring(0, slash);
+    }
+
+    private static string VersionOf(string key)
+    {
+        int slash = key.IndexOf('/');
+        return slash < 0 ? "" : key.Substring(slash + 1);
+    }
+}
+
+// A minimal JSON reader: objects (members kept in file order), arrays, strings, numbers, true, false, null.
+public static class DomentJson
+{
+    public sealed class Obj
+    {
+        public readonly List<KeyValuePair<string, object>> Members = new List<KeyValuePair<string, object>>();
+
+        public object Get(string name)
+        {
+            foreach (KeyValuePair<string, object> member in Members)
+            {
+                if (member.Key == name)
+                {
+                    return member.Value;
+                }
+            }
+            return null;
+        }
+    }
+
+    public static object Parse(string text)
+    {
+        int position = 0;
+        object value = ReadValue(text, ref position);
+        SkipWhitespace(text, ref position);
+        if (position != text.Length)
+        {
+            throw new FormatException("unexpected text after the JSON value at offset " + position);
+        }
+        return value;
+    }
+
+    private static object ReadValue(string text, ref int position)
+    {
+        SkipWhitespace(text, ref position);
+        if (position >= text.Length)
+        {
+            throw new FormatException("unexpected end of JSON");
+        }
+        char c = text[position];
+        if (c == '{')
+        {
+            var obj = new Obj();
+            position++;
+            SkipWhitespace(text, ref position);
+            if (Peek(text, position) == '}')
+            {
+                position++;
+                return obj;
+            }
+            while (true)
+            {
+                SkipWhitespace(text, ref position);
+                string name = ReadString(text, ref position);
+                SkipWhitespace(text, ref position);
+                Expect(text, ref position, ':');
+                obj.Members.Add(new KeyValuePair<string, object>(name, ReadValue(text, ref position)));
+                SkipWhitespace(text, ref position);
+                if (Peek(text, position) == ',')
+                {
+                    position++;
+                    continue;
+                }
+                Expect(text, ref position, '}');
+                return obj;
+            }
+        }
+        if (c == '[')
+        {
+            var list = new List<object>();
+            position++;
+            SkipWhitespace(text, ref position);
+            if (Peek(text, position) == ']')
+            {
+                position++;
+                return list;
+            }
+            while (true)
+            {
+                list.Add(ReadValue(text, ref position));
+                SkipWhitespace(text, ref position);
+                if (Peek(text, position) == ',')
+                {
+                    position++;
+                    continue;
+                }
+                Expect(text, ref position, ']');
+                return list;
+            }
+        }
+        if (c == '"')
+        {
+            return ReadString(text, ref position);
+        }
+        if (ReadLiteral(text, ref position, "true"))
+        {
+            return true;
+        }
+        if (ReadLiteral(text, ref position, "false"))
+        {
+            return false;
+        }
+        if (ReadLiteral(text, ref position, "null"))
+        {
+            return null;
+        }
+        int start = position;
+        while (position < text.Length && "+-0123456789.eE".IndexOf(text[position]) >= 0)
+        {
+            position++;
+        }
+        if (position == start)
+        {
+            throw new FormatException("unexpected character '" + c + "' at offset " + position);
+        }
+        return double.Parse(text.Substring(start, position - start), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string ReadString(string text, ref int position)
+    {
+        Expect(text, ref position, '"');
+        var result = new StringBuilder();
+        while (true)
+        {
+            if (position >= text.Length)
+            {
+                throw new FormatException("unterminated JSON string");
+            }
+            char c = text[position++];
+            if (c == '"')
+            {
+                return result.ToString();
+            }
+            if (c != '\\')
+            {
+                result.Append(c);
+                continue;
+            }
+            if (position >= text.Length)
+            {
+                throw new FormatException("unterminated JSON escape");
+            }
+            char escape = text[position++];
+            switch (escape)
+            {
+                case 'b': result.Append('\b'); break;
+                case 'f': result.Append('\f'); break;
+                case 'n': result.Append('\n'); break;
+                case 'r': result.Append('\r'); break;
+                case 't': result.Append('\t'); break;
+                case 'u':
+                    result.Append((char)Convert.ToInt32(text.Substring(position, 4), 16));
+                    position += 4;
+                    break;
+                default: result.Append(escape); break;
+            }
+        }
+    }
+
+    private static bool ReadLiteral(string text, ref int position, string literal)
+    {
+        if (string.CompareOrdinal(text, position, literal, 0, literal.Length) == 0)
+        {
+            position += literal.Length;
+            return true;
+        }
+        return false;
+    }
+
+    private static void SkipWhitespace(string text, ref int position)
+    {
+        while (position < text.Length && char.IsWhiteSpace(text[position]))
+        {
+            position++;
+        }
+    }
+
+    private static char Peek(string text, int position)
+    {
+        return position < text.Length ? text[position] : '\0';
+    }
+
+    private static void Expect(string text, ref int position, char expected)
+    {
+        if (Peek(text, position) != expected)
+        {
+            throw new FormatException("expected '" + expected + "' at offset " + position);
+        }
+        position++;
     }
 }
 

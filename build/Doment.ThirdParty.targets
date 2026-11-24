@@ -7,7 +7,28 @@
     </Task>
   </UsingTask>
 
+  <UsingTask TaskName="DomentReferenceCheck"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)Doment.BuildChecks.cs" />
+    </Task>
+  </UsingTask>
+
+  <Target Name="DomentReferenceCheck"
+          BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences">
+    <DomentReferenceCheck References="@(ProjectReference)"
+                          FrameworkPath="$(DomentFrameworkDir)"
+                          RepoRoot="$(DomentRepoRoot)"
+                          TargetFramework="$(TargetFramework)"
+                          BuildOnly="$(DomentBuildOnly)"
+                          ProjectPath="$(MSBuildProjectFullPath)" />
+  </Target>
+
   <Target Name="DomentThirdPartyCheck" AfterTargets="ResolvePackageAssets">
-    <DomentThirdPartyCheck RegisterFile="$(DomentRegisterFile)" />
+    <DomentThirdPartyCheck RegisterFile="$(DomentRegisterFile)"
+                           ProjectAssetsFile="$(ProjectAssetsFile)"
+                           ProjectPath="$(MSBuildProjectFullPath)"
+                           BuildOnly="$(DomentBuildOnly)" />
   </Target>
 </Project>

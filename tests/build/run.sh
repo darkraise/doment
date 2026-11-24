@@ -620,7 +620,7 @@ XML
   dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
     "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages"
   expect_rc 0
-  expect_no_out 'DOMENT'
+  expect_no_out 'DOMENT[0-9]'
   local packages
   packages=$(assets_packages "$T/real/obj/project.assets.json")
   # Control: the same build against another pin fails, so the check did run on the real framework.
@@ -792,6 +792,151 @@ case_register_missing_file() {
   dn build "$FIXTURE_RUN/register_missing_file/src/App"
   expect_rc 1
   expect_count "error DOMENT013: $register: table 'Exceptions' is missing$" 1
+}
+
+# Packs Fx.Listed, Fx.Unlisted, Fx.Tool and Fx.Parent (which depends on Fx.Unlisted) into the
+# run feed, once per run.
+pack_fixture_packages() {
+  [[ -f $TROOT/packed ]] && return 0
+  local src=$TROOT/packsrc id dep
+  mkdir -p "$src"
+  echo '<Project />' > "$src/Directory.Build.props"
+  echo '<Project />' > "$src/Directory.Build.targets"
+  for id in Fx.Listed Fx.Unlisted Fx.Tool Fx.Parent; do
+    dep=
+    [[ $id == Fx.Parent ]] && dep='<ItemGroup><PackageReference Include="Fx.Unlisted" Version="1.0.0" /></ItemGroup>'
+    write_file "$src/$id/$id.csproj" <<XML
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>$id</PackageId>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  $dep
+</Project>
+XML
+    echo "namespace ${id//./}; public static class Marker { }" > "$src/$id/Marker.cs"
+    dn pack "$src/$id" -o "$FEED"
+    [[ $RC -eq 0 ]] || fail "packing $id failed: $(tail -n 20 <<<"$OUT")"
+  done
+  touch "$TROOT/packed"
+}
+
+# Adds the X8, X9 and B9 rows the package cases rely on to a case's register.
+add_fixture_rows() {
+  local register=$FIXTURE_RUN/$1/register.md
+  # The backticks are Markdown, not command substitution.
+  # shellcheck disable=SC2016
+  sed -i '/^| X1 |/a | X8 | Fx listed | `Fx.Listed` | Tests | Fixture | MIT | `IFixture` | None | 2026-11-24 |\n| X9 | Fx parent | `Fx.Parent` | Tests | Fixture | MIT | `IFixture` | None | 2026-11-24 |' "$register"
+  # shellcheck disable=SC2016
+  sed -i '/^| B2 |/a | B9 | Fx tool | `Fx.Tool` | Tests | MIT | 2026-11-24 |' "$register"
+}
+
+# package_case <case> <relative dir> <target framework> [specs...]: a fixture project with the
+# packages packed and the extra register rows added.
+package_case() {
+  pack_fixture_packages
+  fixture_project "$@"
+  add_fixture_rows "$1"
+}
+
+CASES+=(packages_listed)
+case_packages_listed() {
+  package_case packages_listed src/App net10.0 package=Fx.Listed/1.0.0
+  dn build "$FIXTURE_RUN/packages_listed/src/App"
+  expect_rc 0
+  expect_no_out 'error DOMENT'
+  expect_count 'DOMENT-PACKAGES: 1$' 1
+}
+
+CASES+=(package_unlisted_direct)
+case_package_unlisted_direct() {
+  package_case package_unlisted_direct src/App net10.0 package=Fx.Unlisted/1.0.0
+  local root=$FIXTURE_RUN/package_unlisted_direct
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT010: $root/src/App/App.csproj: package Fx.Unlisted 1.0.0 is in no table of $root/register.md \(direct reference\)$" 1
+}
+
+CASES+=(package_unlisted_transitive)
+case_package_unlisted_transitive() {
+  local root=$FIXTURE_RUN/package_unlisted_transitive
+  package_case package_unlisted_transitive src/App net10.0 package=Fx.Parent/1.0.0
+  fixture_project package_unlisted_transitive src/Lib net10.0 package=Fx.Unlisted/1.0.0
+  fixture_project package_unlisted_transitive src/App2 net10.0 project=../Lib/Lib.csproj
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT010: $root/src/App/App.csproj: package Fx.Unlisted 1.0.0 is in no table of $root/register.md \(through Fx.Parent\)$" 1
+  dn build "$root/src/App2"
+  expect_rc 1
+  expect_count "error DOMENT010: $root/src/App2/App2.csproj: package Fx.Unlisted 1.0.0 is in no table of $root/register.md \(through project Lib\)$" 1
+}
+
+CASES+=(buildonly_package)
+case_buildonly_package() {
+  local root=$FIXTURE_RUN/buildonly_package
+  package_case buildonly_package src/App net10.0 package=Fx.Tool/1.0.0
+  fixture_project buildonly_package tests/App.Tests net10.0 package=Fx.Tool/1.0.0
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT011: $root/src/App/App.csproj ships but resolves build-and-test-only package Fx.Tool 1.0.0, row B9 of $root/register.md \(direct reference\)$" 1
+  dn build "$root/tests/App.Tests"
+  expect_rc 0
+  expect_no_out 'error DOMENT'
+}
+
+CASES+=(buildonly_project_ref)
+case_buildonly_project_ref() {
+  local root=$FIXTURE_RUN/buildonly_project_ref
+  fixture_project buildonly_project_ref tools/Helper net10.0
+  fixture_project buildonly_project_ref src/App net10.0 project=../../tools/Helper/Helper.csproj
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT011: $root/src/App/App.csproj ships but references build-only project $root/tools/Helper/Helper.csproj$" 1
+}
+
+CASES+=(framework_refs)
+case_framework_refs() {
+  local fw=$DOMENT_FIXTURE_FRAMEWORK root
+  fixture_project framework_core src/App net10.0 "project=$fw/src/Darkraise/Darkraise.csproj"
+  dn build "$FIXTURE_RUN/framework_core/src/App"
+  expect_rc 0
+
+  root=$FIXTURE_RUN/framework_api
+  fixture_project framework_api src/App net10.0 "project=$fw/src/Darkraise.Api/Darkraise.Api.csproj"
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT012: $root/src/App/App.csproj: project reference $fw/src/Darkraise.Api/Darkraise.Api.csproj is not an allowed darkraise-framework project$" 1
+
+  root=$FIXTURE_RUN/framework_win32_from_net10
+  fixture_project framework_win32_from_net10 src/App net10.0 "project=$fw/src/Darkraise.Win32UI/Darkraise.Win32UI.csproj"
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT012: $root/src/App/App.csproj: project reference $fw/src/Darkraise.Win32UI/Darkraise.Win32UI.csproj is not an allowed darkraise-framework project$" 1
+  expect_no_out 'NU1201'
+
+  root=$FIXTURE_RUN/framework_outside
+  mkdir -p "$TROOT/outside/Other"
+  printf '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n' \
+    > "$TROOT/outside/Other/Other.csproj"
+  fixture_project framework_outside src/App net10.0 "project=$TROOT/outside/Other/Other.csproj"
+  dn build "$root/src/App"
+  expect_rc 1
+  expect_count "error DOMENT012: $root/src/App/App.csproj: project reference $TROOT/outside/Other/Other.csproj is not an allowed darkraise-framework project$" 1
+
+  root=$FIXTURE_RUN/framework_windows
+  fixture_project framework_windows src/WinApp net10.0-windows \
+    "project=$fw/src/Darkraise.Win32UI/Darkraise.Win32UI.csproj" \
+    "project=$fw/src/Darkraise.Win32UI.Generators/Darkraise.Win32UI.Generators.csproj"
+  dn msbuild "$root/src/WinApp" -t:DomentReferenceCheck
+  expect_rc 0
+  expect_no_out 'DOMENT012'
+
+  root=$FIXTURE_RUN/framework_windows_api
+  fixture_project framework_windows_api src/WinApp net10.0-windows "project=$fw/src/Darkraise.Api/Darkraise.Api.csproj"
+  dn msbuild "$root/src/WinApp" -t:DomentReferenceCheck
+  expect_rc 1
+  expect_count "error DOMENT012: $root/src/WinApp/WinApp.csproj: project reference $fw/src/Darkraise.Api/Darkraise.Api.csproj is not an allowed darkraise-framework project$" 1
 }
 
 # ---------------------------------------------------------------------------
