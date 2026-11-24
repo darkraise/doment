@@ -1,0 +1,1 @@
+- 2026-11-24 `docs/dforge/plans/2026-11-24-architecture-decisions.md` — merged into `master` at 4a8b062
