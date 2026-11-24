@@ -10,7 +10,7 @@
 
 **Spec:** docs/dforge/specs/2026-11-24-repository-build-nativeaot-design.md
 
-**Execution:** inline — `claude --model opus --effort high` — the highest task total is 7 (Tasks 4, 5, 9, 10, 11, 12), the floor row for 6 to 8 is opus/high
+**Execution:** inline — `claude --model opus --effort high` — the highest task total is 7 (Tasks 4, 5, 9, 11, 12), the floor row for 6 to 8 is opus/high
 
 **Parallelism:** sequential — inline execution
 
@@ -21,6 +21,8 @@
 **CI:** none
 
 **Worktree setup:** `bash tools/framework.sh sync && { [ ! -f .config/dotnet-tools.json ] || dotnet tool restore; }`
+
+**Plan review:** 2026-11-24 — dforge:judge-opus — executability 13 / coherence 15 / coverage 15 / assumptions 12 (round 1)
 
 ## Global Constraints
 
@@ -69,6 +71,7 @@
 - `build/check.sh [<step>...]`; steps `build`, `portable`, `aot`, `test`; no argument runs all four in that order.
 - Tree root: the parent of the script's own directory, computed with `cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P`, never with git. The solution is `<root>/doment.slnx`.
 - Global properties on every call: `-c Release -p:FrameworkPinStrict=true -p:DomentFormatCheck=true -p:DomentAuditStrict=true`.
+- First line: `check: dotnet <SDK version> at <DOTNET_ROOT>`, the SDK that PATH resolves and the `DOTNET_ROOT` the script exports.
 - Output: `check: <step> ok`, or `check: <step> failed` followed by cause lines indented by four spaces; last line `check: <n> steps run, <f> failed`. The portable step also prints one progress line per build, `check: portable <project name> <rid>`, before it runs.
 - Exit 0 when every step passed, 1 at the first failed step (no later step runs), 2 on usage: `check: unknown step '<s>'; steps: build, portable, aot, test`.
 - `DOMENT_CHECK_TIMEOUT` (seconds) overrides every call's timeout; a timeout's cause line is `timed out after <s> s: <command>`.
@@ -92,9 +95,13 @@
 - `dotnet test --solution` under Microsoft Testing Platform accepts the gate's logger flags: unverified — Task 1 verifies it (P6).
 - `'` in a tree path works through the gate's property functions: unverified — Task 1 verifies it (P7).
 - CSharpier skips a file listed in `.csharpierignore` even when passed by path: unverified — Task 1 verifies it (P8).
+- doment's root build files never reach a framework project: `external/Directory.Build.targets` and `external/Directory.Packages.props` are empty `<Project />` stubs that end MSBuild's upward search above `external/darkraise-framework` (`docs/architecture.md`, "One framework worktree per doment checkout"; file read 2026-11-24), the framework's own `Directory.Build.props` ends the props search, and an overridden framework path lies outside the checkout. So the new targets need no framework-exclusion condition, and the existing `real_framework_strict` case, which builds the real framework under the root settings, keeps passing only if this holds.
+- The Microsoft Testing Platform test executable's runtime: an apphost picks the highest installed patch of the 10.0 runtime under `DOTNET_ROOT`; A17 checks the effect directly with a probe executable rather than relying on a `--info` output format.
 - CSharpier 1.2.6 is the framework's formatter version: `csharpier --version` printed `1.2.6` on 2026-11-24.
 - GHSA-p3jp-9v83-76w9 is fixed from 10.0.14 for `Microsoft.DotNet.ILCompiler` and the linux-x64 runtime packs: GitHub advisory API, read 2026-11-24.
 - `Newtonsoft.Json` 12.0.1 carries advisory GHSA-5crp-9r3c-p9vr (high), used as the known-vulnerable package of A27's stand-in: unverified — Task 1 verifies it (P4 restores it).
+
+- Plan review round 1 scored executability 13 and assumptions 12 (borderline). Decision: no second round. Every Important finding was fixed in place (test counts, A10's `# doment:` marker, A20's baseline, the batching and no-stamp tests, the LibraryImport text, the runtime check, the P5 win-x64 test restore, commit scopes), and the framework-reach finding is answered by the evidence above. The remaining uncertainty is the eight probes, which Task 1 settles before any task depends on them.
 
 ## Task index
 
@@ -110,7 +117,7 @@
 10. Portable assembly check
 11. Check command core
 12. Portable and NativeAOT steps
-13. Documentation and register
+13. Documentation
 
 ---
 
@@ -150,7 +157,7 @@ Expected: `FAIL A1: ...`. Step 3's item 3 (the harness and `t_A1`) is written fi
    - P2: a net10.0 project with `EnforceCodeStyleInBuild=true`, `TreatWarningsAsErrors=true`, `AnalysisLevel=latest-recommended`, `AnalysisModeStyle=Default`, the framework's `.editorconfig` plus `dotnet_diagnostic.IDE0161.severity = warning` and `dotnet_diagnostic.IDE0028.severity`, `IDE0300` to `IDE0305` at `warning`, and a source file with a block-scoped namespace, an array initialiser `int[] a = new int[] { 1, 2 };`, unused usings and a badly indented line. Record every diagnostic id that fails the build. Consequence: whether IDE0055 needs `none` (Task 3).
    - P3: an inline `RoslynCodeTaskFactory` task with `<Reference Include="System.Reflection.Metadata" />` that opens a built assembly with `PEReader` and counts `MethodDefinition`s with an import. Record whether it compiles and runs. Consequence for Task 10: the reference path, or the netstandard 2.0 fallback reader.
    - P4: a net10.0 project with `TreatWarningsAsErrors=true`, `WarningsNotAsErrors` holding `NU1901;NU1902;NU1903;NU1904`, and `PackageReference` `Newtonsoft.Json` 12.0.1: does `dotnet restore` succeed with NU1903; with `WarningsAsErrors` adding them back, does it fail. Consequence for Task 4: the mechanism, or the spec's fallback (`TreatWarningsAsErrors` false in restore evaluations unless strict).
-   - P5: a `PublishAot=true` console project built with `-r win-x64` on Linux, and an xUnit v3 4.0.2 test project with `Microsoft.Testing.Extensions.TrxReport` 2.5.1 and `UseMicrosoftTestingPlatformRunner=true`; list both restore closures (`project.assets.json` libraries, and `downloadDependencies`) and match each against `docs/third-party-exceptions.md`. Consequence for Tasks 6 and 12: the platform rows to add, whether the portable step passes `-p:PublishAot=false` for win-x64, and any package for the owner.
+   - P5: a `PublishAot=true` console project built with `-r win-x64` on Linux, and an xUnit v3 4.0.2 test project with `Microsoft.Testing.Extensions.TrxReport` 2.5.1 and `UseMicrosoftTestingPlatformRunner=true`, restored both without a runtime identifier and with `-r win-x64`; list the restore closures (`project.assets.json` libraries, and `downloadDependencies`) and match each against `docs/third-party-exceptions.md`. Consequence for Tasks 6 and 12: the platform rows to add, whether the portable step passes `-p:PublishAot=false` for win-x64, and any package for the owner.
    - P6: `dotnet test --solution <probe>.slnx -nologo -tl:off -clp:NoSummary -noConsoleLogger "-logger:ConsoleLogger,Microsoft.Build;NoSummary;Verbosity=minimal"` on the P5 test project. Consequence for Task 11: keep or drop the logger flags on the test step.
    - P7: `build/gate.sh` on a copy of a no-project tree at a path containing `'` and a space. Consequence for Task 2: `'` stays allowed or joins the refused list.
    - P8: `dotnet csharpier check <file>` on an unformatted file listed in `.csharpierignore`. Consequence for Task 5's test layout.
@@ -165,7 +172,7 @@ Expected: `PASS A1: ...`, then both existing suites end with `0 failed`.
 
 ```bash
 git add global.json docs/dforge/research/2026-11-24-build-probes.md tests/build/repository-build.acceptance.sh build/gate.sh tests/build/run.sh tests/build/architecture-decisions.acceptance.sh
-git commit -m "build: pin SDK 10.0.404 and record build probes"
+git commit -m "chore(build): pin SDK 10.0.404 and record probes"
 ```
 
 ### Task 2: Line endings and gate fixes
@@ -235,7 +242,7 @@ git commit -m "fix(build): normalise line endings, harden the gate"
 
 - [ ] **Step 1: Write the failing test**
 
-- `tests/build/repository-build.acceptance.sh::A10` (integration): given the checkout and its framework worktree at the pin, asserts that the root `.editorconfig`, with every line of the documented changes removed (the comment lines introducing them, the `dotnet_diagnostic.IDE0161`, `IDE0028` and `IDE0300` to `IDE0305` lines, and `IDE0055` if Task 1's P2 required it), equals `external/darkraise-framework/.editorconfig` with its `DRUI020` line and that line's comment block removed and `end_of_line = crlf` replaced by `end_of_line = lf`; fails today because there is no root `.editorconfig`. (Task 5 extends A10 with `.csharpierrc`.)
+- `tests/build/repository-build.acceptance.sh::A10` (integration): given the checkout and its framework worktree at the pin, asserts that the root `.editorconfig`, with every line starting `# doment:` removed and every `dotnet_diagnostic.<id>.severity` line for IDE0161, IDE0028, IDE0300 to IDE0305 (and IDE0055 if Task 1's P2 required it) removed, equals `external/darkraise-framework/.editorconfig` with its `DRUI020` line and that line's comment block removed and `end_of_line = crlf` replaced by `end_of_line = lf`; fails today because there is no root `.editorconfig`. (Task 5 extends A10 with `.csharpierrc`.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -245,7 +252,7 @@ Expected: `FAIL A10: ...`
 - [ ] **Step 3: Implement**
 
 1. Copy the framework's `.editorconfig` from the pinned worktree.
-2. Apply the spec's section 4 changes, each introduced by a `#` comment saying why: both `end_of_line` values to `lf`; remove the `DRUI020` block; add, in the `[*.{cs,vb}]` section, `dotnet_diagnostic.IDE0161.severity = warning` and `dotnet_diagnostic.<id>.severity = warning` for IDE0028 and IDE0300 to IDE0305; add `dotnet_diagnostic.IDE0055.severity = none` only if P2 recorded IDE0055 firing.
+2. Apply the spec's section 4 changes, each introduced by comment lines starting `# doment:` that say why (A10 strips exactly those lines): both `end_of_line` values to `lf`; remove the `DRUI020` block; add, in the `[*.{cs,vb}]` section, `dotnet_diagnostic.IDE0161.severity = warning` and `dotnet_diagnostic.<id>.severity = warning` for IDE0028 and IDE0300 to IDE0305; add `dotnet_diagnostic.IDE0055.severity = none` only if P2 recorded IDE0055 firing.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -256,7 +263,7 @@ Expected: `PASS A10: ...`
 
 ```bash
 git add .editorconfig tests/build/repository-build.acceptance.sh
-git commit -m "build: adopt the framework editorconfig"
+git commit -m "chore(build): adopt the framework editorconfig"
 ```
 
 ### Task 4: Compiler and analyzer conventions
@@ -302,7 +309,7 @@ Expected: both end with `0 failed`, the two `conventions_` cases `ok`.
 
 ```bash
 git add build/Doment.Conventions.props Directory.Build.props tests/build/run.sh tests/build/architecture-decisions.acceptance.sh
-git commit -m "build: enforce the framework analyzer rules"
+git commit -m "chore(build): enforce the framework analyzer rules"
 ```
 
 ### Task 5: Format check in every build
@@ -332,6 +339,7 @@ Cases A12 to A14 run in stand-in repositories outside the checkout (`new_doment_
 - `tests/build/run.sh::format_stamp` (integration): given the formatted fixture built once, asserts a second build's detailed log (`-v:d`) shows the format target skipped as up to date; after appending a newline-only change to `.csharpierrc`, asserts the next build runs the check again; and a build with `-p:DesignTimeBuild=true` does not run the check; fails today because the target does not exist.
 - `tests/build/run.sh::format_tool_missing` (integration): given a stand-in without `.config/dotnet-tools.json` and an empty `DOTNET_CLI_HOME`-style tool cache (set `HOME` to an empty directory for the call), asserts `error DOMENT032: CSharpier is not restored; run dotnet tool restore` once; fails today for the same reason.
 - `tests/build/run.sh::format_global_only` (integration): given a fixture project with `<DomentFormatCheck>false</DomentFormatCheck>` in its own file and an unformatted source, asserts the plain build still fails with DOMENT031, and the same build with `-p:DomentFormatCheck=false` exits 0; fails today for the same reason.
+- `tests/build/run.sh::format_batching` (integration): given a fixture project with 101 formatted `.cs` files plus one unformatted file that sorts after them (`Zz.cs`), asserts exactly one `error DOMENT031: Zz.cs is not formatted; run dotnet csharpier format Zz.cs` and, in the `-v:d` log, two `dotnet csharpier check` command lines; fails today because the target does not exist.
 - `tests/build/repository-build.acceptance.sh::A10` extension: asserts `.csharpierrc` parses to the same JSON as `external/darkraise-framework/.csharpierrc`.
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -356,7 +364,7 @@ Expected: every suite ends with `0 failed`.
 
 ```bash
 git add .config/dotnet-tools.json .csharpierrc .csharpierignore build/Doment.Format.targets Directory.Build.targets tests/build/run.sh tests/build/architecture-decisions.acceptance.sh tests/build/repository-build.acceptance.sh
-git commit -m "build: check formatting in every build"
+git commit -m "chore(build): check formatting in every build"
 ```
 
 ### Task 6: Solution, libraries and the test project
@@ -386,8 +394,8 @@ git commit -m "build: check formatting in every build"
 - `...::Run_OtherArguments_PrintUsageToStderr` (unit, theory with rows `[]`, `["--bogus"]`, `["--version", "x"]`): returns 2, `err` is exactly `usage: doment [--version | --help]\n`, `out` empty.
 - `tests/build/repository-build.acceptance.sh::A2` (integration): `dotnet build doment.slnx -c Release -p:FrameworkPinStrict=true` exits 0 with no line matching the C4 warning pattern; fails today because there is no solution.
 - `...::A3` (integration): each project's direct `ProjectReference` file names (read with `dotnet msbuild <proj> -getItem:ProjectReference`) equal its section 3 row, and no project but `Doment.Simulation` has `Doment.Simulation` in its `ReferencePath` after a build; fails today for the same reason. (Task 7 extends the rows with the executables.)
-- `...::A17` (integration, first half): `dotnet test --solution doment.slnx -c Release` exits 0 and its output shows the three tests passed; fails today because there is no solution. (Task 11 moves the case onto `build/check.sh test` and adds the runtime-version check.)
-- `...::A20` (integration): `DOMENT_GATE_NO_FETCH=1 build/gate.sh` exits 0 with `0 violations` and every platform-packages row added in this task names a package that the SDK adds (its "Added by" cell starts `.NET SDK`).
+- `...::A17` (integration, first half): `dotnet test --solution doment.slnx -c Release` exits 0 and its output reports 5 tests passed and 0 failed (two facts and a three-row theory); fails today because there is no solution. (Task 11 moves the case onto `build/check.sh test` and adds the runtime-version check.)
+- `...::A20` (integration): `DOMENT_GATE_NO_FETCH=1 build/gate.sh` exits 0 with `0 violations`, and every row of the register's Platform packages table has an "Added by" cell starting `.NET SDK`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -404,8 +412,8 @@ Expected: A2, A3, A17 FAIL (A20 may pass on a tree with no projects).
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `dotnet test --solution doment.slnx -c Release && bash tests/build/repository-build.acceptance.sh '^A(2|3|17|20):'`
-Expected: 3 tests passed; four PASS lines.
+Run: `timeout 600 dotnet test --solution doment.slnx -c Release && bash tests/build/repository-build.acceptance.sh '^A(2|3|17|20):'`
+Expected: 5 tests passed, 0 failed; four PASS lines.
 
 - [ ] **Step 5: Commit**
 
@@ -431,9 +439,9 @@ git commit -m "feat(core): add the solution and library projects"
 
 **Evaluation:** files 1 - spec 2 - coupling 1 - risk 0 = 4
 
-- [ ] **Step 1: Extend the test `tests/build/repository-build.acceptance.sh::A3`**
+- [ ] **Step 1: Write the failing test**
 
-- Add the rows `Doment.Server` → Core, `Doment.Cli` → Client, `Doment.Agent` → Host; fails today because the projects do not exist.
+- `tests/build/repository-build.acceptance.sh::A3` (integration, rows added): `Doment.Server` → Core, `Doment.Cli` → Client, `Doment.Agent` → Host; fails today because the projects do not exist.
 - `tests/build/repository-build.acceptance.sh::A4` (integration, first half): for each executable, `dotnet run --project <proj> -c Release -- --version` exits 0 and prints `^<assembly name> 0\.1\.0([+-]|$)`; `-- --bogus` exits 2 with the usage line on stderr; fails today because the projects do not exist. (Task 12 replaces the `dotnet run` call with `build/check.sh aot`.)
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -502,7 +510,7 @@ Expected: both cases `ok`; three PASS lines.
 
 ```bash
 git add build/Doment.Simulation.targets Directory.Build.targets src/Doment.Cli/Doment.Cli.csproj src/Doment.Agent/Doment.Agent.csproj tests/build/run.sh tests/build/repository-build.acceptance.sh
-git commit -m "build: keep simulation out of release publishes"
+git commit -m "chore(build): keep simulation out of releases"
 ```
 
 ### Task 9: Portable platform rules
@@ -550,7 +558,7 @@ Expected: `0 failed`; two PASS lines.
 
 ```bash
 git add build/Doment.Platform.targets Directory.Build.targets tests/build/run.sh tests/build/repository-build.acceptance.sh
-git commit -m "build: enforce the portable platform rules"
+git commit -m "chore(build): enforce portable platform rules"
 ```
 
 ### Task 10: Portable assembly check
@@ -574,10 +582,10 @@ git commit -m "build: enforce the portable platform rules"
 
 - `tests/build/run.sh::portable_assembly` (integration, a table of fixture rows, each a portable net10.0 library with one source file): asserts exactly one DOMENT033 line per row with the C3 text:
   - `[DllImport("libc")] static extern int getpid();` in class `Native` → `declares a native import Native.getpid from libc`;
-  - `[LibraryImport("libc")] static partial int getppid();` in `partial class Native2` (with `AllowUnsafeBlocks` as the generator needs) → `declares a native import Native2.getppid from libc` (the generator's inner stub name is acceptable if it is the method carrying the import; record which);
+  - `[LibraryImport("libc")] static partial int getppid();` in `partial class Native2` (with `AllowUnsafeBlocks` as the generator needs) → a line matching `declares a native import Native2\.\S+ from libc` (the source generator puts the import on a generated stub inside `Native2`, whose metadata name the check reports as it finds it);
   - `NativeLibrary.TryLoad("libc", out _)` → `references System.Runtime.InteropServices.NativeLibrary`;
   - `[assembly: System.Runtime.Versioning.SupportedOSPlatform("linux")]` → `carries the assembly attribute SupportedOSPlatform("linux")`;
-  and, for each row, the same project built with `-p:DomentPlatform=linux` exits 0, a clean portable library exits 0 with no DOMENT033, and a build with `-p:DesignTimeBuild=true` raises none; fails today because nothing reads the assembly.
+  and the `DllImport` row built a second time without any change raises the same DOMENT033 again (no stamp); for each row, the same project built with `-p:DomentPlatform=linux` exits 0, a clean portable library exits 0 with no DOMENT033, and a build with `-p:DesignTimeBuild=true` raises none; fails today because nothing reads the assembly.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -599,7 +607,7 @@ Expected: `0 failed`; `PASS A2: ...` (the real projects stay clean).
 
 ```bash
 git add build/Doment.PortableCheck.cs build/Doment.Platform.targets tests/build/run.sh
-git commit -m "build: reject native calls in portable projects"
+git commit -m "chore(build): reject native calls in portable code"
 ```
 
 ### Task 11: Check command core
@@ -620,7 +628,7 @@ git commit -m "build: reject native calls in portable projects"
 
 - [ ] **Step 1: Write the failing test**
 
-- `tests/build/repository-build.acceptance.sh::A17` (rewritten): `build/check.sh test` exits 0, prints `check: test ok` and `check: 1 steps run, 0 failed`, and the test executable run with `--info` under the `DOTNET_ROOT` that `check.sh` exports reports runtime 10.0.14 or later; fails today because `build/check.sh` does not exist.
+- `tests/build/repository-build.acceptance.sh::A17` (rewritten): `build/check.sh test` exits 0 and prints `check: dotnet 10.0.4<nn> at <dir>` first, `check: test ok` and `check: 1 steps run, 0 failed`; a probe console app built under `artifacts/acceptance/` that prints `Environment.Version`, run through its apphost with `DOTNET_ROOT=<dir>` from that first line, prints 10.0.14 or later; fails today because `build/check.sh` does not exist.
 - `...::A18` (integration): `build/check.sh build test` prints `check: build ok`, `check: test ok`, `check: 2 steps run, 0 failed` in that order and exits 0; `DARKRAISE_FRAMEWORK_PATH=/nonexistent build/check.sh` prints `check: build failed`, a cause line holding `DOMENT003`, `check: 1 steps run, 1 failed`, no `check: portable` line, and exits 1; `build/check.sh bogus` exits 2 with `check: unknown step 'bogus'; steps: build, portable, aot, test`. (Task 12 adds the no-argument success run with all four steps.)
 - `...::A19` (integration): records the PIDs of `dotnet`, `MSBuild`, `VBCSCompiler`, `ilc` and `Doment.Core.Tests` processes before; after `build/check.sh build test` returns, after `DOMENT_CHECK_TIMEOUT=1 build/check.sh build` (which must print `timed out after 1 s:` and exit 1), and after `build/check.sh build` is sent SIGTERM two seconds into its run, asserts no process of those names exists that was not in the before-set (wait at most 10 s for each to go); fails today because `build/check.sh` does not exist.
 
@@ -643,7 +651,7 @@ Expected: three PASS lines.
 
 ```bash
 git add build/check.sh tests/build/repository-build.acceptance.sh
-git commit -m "build: add the check command"
+git commit -m "feat(build): add the check command"
 ```
 
 ### Task 12: Portable and NativeAOT steps
@@ -694,13 +702,15 @@ Expected: `0 failed`; `check: 4 steps run, 0 failed`.
 
 ```bash
 git add build/check.sh docs/third-party-exceptions.md tests/build/repository-build.acceptance.sh
-git commit -m "build: add the portable and NativeAOT steps"
+git commit -m "feat(build): add portable and NativeAOT steps"
 ```
 
-### Task 13: Documentation and register
+### Task 13: Documentation
 
 **Files:**
 - Modify: `docs/architecture.md`, `README.md`
+
+Register rows are not edited here: every row this plan discharges already carries its acceptance numbers (rows #6 to #9 of the architecture-decisions register: A21 to A24), and dforge:finishing-a-development-branch moves them to done or verify from those cells.
 
 **Interfaces:**
 - Consumes: every Contract (documents them).
