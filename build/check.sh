@@ -128,14 +128,61 @@ step_build() {
   call_ok 600 dotnet build "$SOLUTION" "${PROPS[@]}" "${DN_FLAGS[@]}"
 }
 
+# Sets PROJECTS to the solution's project paths, relative to the root.
+projects() {
+  call_ok 600 dotnet sln "$SOLUTION" list || return 1
+  mapfile -t PROJECTS < <(tr '\\' '/' < "$OUTPUT" | grep -E '\.(cs|fs|vb)proj$')
+}
+
+# property <project> <name>: sets VALUE to the project's evaluated property.
+property() {
+  call_ok 600 dotnet msbuild "$ROOT/$1" -nologo "-getProperty:$2" -p:Configuration=Release || return 1
+  VALUE=$(tail -n 1 "$OUTPUT")
+}
+
 step_portable() {
-  echo "not implemented" > "$CAUSE"
-  return 1
+  projects || return 1
+  local proj rid flags
+  for proj in "${PROJECTS[@]}"; do
+    property "$proj" DomentPlatform || return 1
+    [[ $VALUE == portable ]] || continue
+    for rid in linux-x64 win-x64; do
+      echo "check: portable $(basename "$proj" .csproj) $rid"
+      # A NativeAOT executable built for win-x64 would restore runtime.win-x64.Microsoft.DotNet.ILCompiler
+      # (docs/dforge/research/2026-11-24-build-probes.md, P5); without it the project still compiles for win-x64.
+      flags=()
+      [[ $rid == win-x64 ]] && flags=(-p:PublishAot=false)
+      call_ok 600 dotnet build "$ROOT/$proj" "${PROPS[@]}" -r "$rid" "${flags[@]}" "${DN_FLAGS[@]}" || return 1
+    done
+  done
 }
 
 step_aot() {
-  echo "not implemented" > "$CAUSE"
-  return 1
+  projects || return 1
+  local proj name version dir first
+  for proj in "${PROJECTS[@]}"; do
+    property "$proj" PublishAot || return 1
+    [[ $VALUE == true ]] || continue
+    property "$proj" AssemblyName || return 1
+    name=$VALUE
+    property "$proj" VersionPrefix || return 1
+    version=$VALUE
+    dir=$ROOT/artifacts/publish/$name/linux-x64
+    call_ok 1200 dotnet publish "$ROOT/$proj" "${PROPS[@]}" -r linux-x64 -o "$dir" "${DN_FLAGS[@]}" || return 1
+    grep -E "$WARNING_RE" "$OUTPUT" | sed -E 's/ \[[^]]*\]$//' | awk '!seen[$0]++' > "$CAUSE"
+    [[ -s $CAUSE ]] && return 1
+
+    call 60 "$dir/$name" --version
+    if [[ $TIMED_OUT -eq 1 ]]; then
+      call_cause
+      return 1
+    fi
+    first=$(head -n 1 "$OUTPUT")
+    if [[ $RC -ne 0 ]] || ! grep -Eq "^${name//./\\.} ${version//./\\.}([+-]|\$)" <<<"$first"; then
+      echo "$dir/$name --version exited $RC with first line '$first'; expected '$name $version'" > "$CAUSE"
+      return 1
+    fi
+  done
 }
 
 step_test() {

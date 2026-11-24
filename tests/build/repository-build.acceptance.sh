@@ -196,23 +196,29 @@ EXECUTABLES=(
 )
 
 t_A4() {
-  local row proj name stdout
+  case_ "check.sh aot"
+  [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
+  check_sh aot
+  rc_is 0
+  has '^check: aot ok$'
+  hasnt "$WARNING_RE"
+
+  local row name bin stdout
   for row in "${EXECUTABLES[@]}"; do
-    proj=${row%%|*}
     name=${row#*|}
+    bin=$REPO_ROOT/artifacts/publish/$name/linux-x64/$name
     case_ "$name --version"
-    if [[ ! -f $REPO_ROOT/$proj ]]; then
-      note "no project $proj"
+    if [[ ! -x $bin ]]; then
+      note "no executable $bin"
       continue
     fi
-    stdout=$(cd "$REPO_ROOT" && timeout 600 dotnet run --project "$proj" -c Release -- --version 2>"$T/a4.err") && RC=0 || RC=$?
+    stdout=$(timeout 60 "$bin" --version 2>"$T/a4.err") && RC=0 || RC=$?
     OUT=$stdout$'\n'$(cat "$T/a4.err")
     rc_is 0
-    OUT=$stdout
-    has "^${name} 0\\.1\\.0([+-]|\$)"
+    eq "$(head -n 1 <<<"$stdout" | grep -Ec "^${name} 0\\.1\\.0([+-]|\$)")" 1 "first line of $name --version: $(head -n 1 <<<"$stdout")"
 
     case_ "$name --bogus"
-    stdout=$(cd "$REPO_ROOT" && timeout 600 dotnet run --project "$proj" -c Release -- --bogus 2>"$T/a4.err") && RC=0 || RC=$?
+    stdout=$(timeout 60 "$bin" --bogus 2>"$T/a4.err") && RC=0 || RC=$?
     OUT=$stdout$'\n'$(cat "$T/a4.err")
     rc_is 2
     OUT=$(cat "$T/a4.err")
@@ -220,6 +226,121 @@ t_A4() {
     OUT=$stdout
     hasnt '^usage:'
   done
+}
+
+t_A5() {
+  local row proj assets
+  for row in "${EXECUTABLES[@]}"; do
+    proj=${row%%|*}
+    assets=$REPO_ROOT/$(dirname "$proj")/obj/project.assets.json
+    case_ "$(basename "$proj" .csproj) assets"
+    if [[ ! -f $assets ]]; then
+      note "no $assets; A4 publishes first"
+      continue
+    fi
+    local id version
+    for id in Microsoft.DotNet.ILCompiler runtime.linux-x64.Microsoft.DotNet.ILCompiler; do
+      version=$(jq -r --arg id "$id" '.libraries | keys[] | select(startswith($id + "/")) | sub("^[^/]*/"; "")' "$assets")
+      if [[ -z $version ]]; then note "no $id in $assets"; continue; fi
+      check "$id is $version, below 10.0.14" version_at_least "$version" 10.0.14
+    done
+    local packs
+    # A download dependency's version is a range such as "[10.0.15, 10.0.15]"; its lower bound is checked.
+    packs=$(jq -r '.project.frameworks[].downloadDependencies[]? | select(.name | test("linux-x64"))
+      | "\(.name) \(.version | gsub("[\\[\\]() ]"; "") | split(",")[0])"' "$assets")
+    [[ -n $packs ]] || note "no linux-x64 runtime pack among the download dependencies of $assets"
+    local pack
+    while IFS=' ' read -r pack version; do
+      [[ -n $pack ]] || continue
+      check "$pack is $version, below 10.0.14" version_at_least "$version" 10.0.14
+    done <<<"$packs"
+  done
+
+  case_ "audit"
+  dn "$REPO_ROOT" restore doment.slnx -p:DomentAuditStrict=true
+  rc_is 0
+  hasnt 'NU190'
+}
+
+# standin <name>: a stand-in tree at $T/<name> (under artifacts/acceptance/) with the checkout's build files and a
+# copy of its register; prints its path. The real framework worktree is reached through DARKRAISE_FRAMEWORK_PATH.
+standin() {
+  local d=$T/$1 f
+  mkdir -p "$d/docs"
+  for f in Directory.Build.props Directory.Build.targets global.json .editorconfig .csharpierrc .csharpierignore; do
+    cp "$REPO_ROOT/$f" "$d/$f"
+  done
+  cp -r "$REPO_ROOT/build" "$REPO_ROOT/.config" "$d/"
+  cp "$REPO_ROOT/docs/third-party-exceptions.md" "$d/docs/third-party-exceptions.md"
+  printf '<Solution>\n  <Folder Name="/src/">\n    <Project Path="src/Fx/Fx.csproj" />\n  </Folder>\n</Solution>\n' > "$d/doment.slnx"
+  echo "$d"
+}
+
+standin_check() { # standin_check <tree> <args...>
+  local tree=$1
+  shift
+  OUT=$(cd "$tree" && env "DARKRAISE_FRAMEWORK_PATH=$REPO_ROOT/external/darkraise-framework" timeout 3000 bash build/check.sh "$@" 2>&1) &&
+    RC=0 || RC=$?
+}
+
+t_A6() {
+  case_ "trim warning fails the aot step"
+  local d
+  d=$(standin a6)
+  mkdir -p "$d/src/Fx"
+  printf '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n    <AssemblyName>fx</AssemblyName>\n    <PublishAot>true</PublishAot>\n    <TrimmerSingleWarn>false</TrimmerSingleWarn>\n  </PropertyGroup>\n</Project>\n' \
+    > "$d/src/Fx/Fx.csproj"
+  printf 'System.Console.WriteLine(System.Type.GetType(System.Console.ReadLine()!)!.GetMethods().Length);\n' > "$d/src/Fx/Program.cs"
+  standin_check "$d" aot
+  rc_is 1
+  has '^check: aot failed$'
+  has '^    .*(IL2|IL3)[0-9]{3}'
+
+  case_ "the warning pattern matches the ILC form"
+  local re
+  re=$(sed -nE "s/^WARNING_RE='(.*)'\$/\\1/p" "$CHECK")
+  [[ -n $re ]] || note "no WARNING_RE in $CHECK"
+  grep -Eq -- "$re" <<<'ILC : Trim analysis warning IL2026: Foo.Bar(): message' || note "/$re/ does not match the ILC warning form"
+}
+
+t_A7() {
+  case_ "check.sh portable"
+  [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
+  check_sh portable
+  rc_is 0
+  has '^check: portable ok$'
+  local p rid
+  for p in Doment.Protocol Doment.Core Doment.Simulation Doment.Worker Doment.Host Doment.Client Doment.Server Doment.Cli Doment.Core.Tests; do
+    for rid in linux-x64 win-x64; do
+      count_is "^check: portable ${p//./\\.} $rid\$" 1
+    done
+  done
+  hasnt '^check: portable Doment\.Agent '
+}
+
+t_A27() {
+  local d
+  d=$(standin a27)
+  mkdir -p "$d/src/Fx"
+  printf '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n  <ItemGroup>\n    <PackageReference Include="Newtonsoft.Json" Version="12.0.1" />\n  </ItemGroup>\n</Project>\n' \
+    > "$d/src/Fx/Fx.csproj"
+  # The backticks are Markdown.
+  # shellcheck disable=SC2016
+  sed -i '/^| X2 |/a | X9 | Newtonsoft.Json | `Newtonsoft.Json` | Acceptance A27 | Known-vulnerable stand-in | MIT | - | - | 2026-11-24 |' \
+    "$d/docs/third-party-exceptions.md"
+
+  case_ "plain build warns"
+  ENVV=("DARKRAISE_FRAMEWORK_PATH=$REPO_ROOT/external/darkraise-framework")
+  build "$d" doment.slnx
+  ENVV=()
+  rc_is 0
+  has 'warning NU1903'
+
+  case_ "check.sh build fails"
+  standin_check "$d" build
+  rc_is 1
+  has '^check: build failed$'
+  error_line_has 'NU1903' 'GHSA-5crp-9r3c-p9vr'
 }
 
 SIMULATION_HOSTS=(src/Doment.Cli/Doment.Cli.csproj src/Doment.Agent/Doment.Agent.csproj)
@@ -307,6 +428,12 @@ t_A18() {
   has '^    .*DOMENT003'
   hasnt '^check: portable'
   eq "$(tail -n 1 <<<"$OUT")" "check: 1 steps run, 1 failed" "last line"
+
+  case_ "every step"
+  check_sh
+  rc_is 0
+  eq "$(grep -E '^check: [a-z]+ (ok|failed)$|^check: [0-9]+ steps' <<<"$OUT" | paste -sd '|')" \
+    "check: build ok|check: portable ok|check: aot ok|check: test ok|check: 4 steps run, 0 failed" "step lines"
 
   case_ "unknown step"
   check_sh bogus
@@ -485,7 +612,10 @@ TESTS=(
   "A1: the SDK on PATH is 10.0.404 or a later 10.0.4xx and global.json pins it with the testing platform|t_A1"
   "A2: the solution builds in Release with no warning|t_A2"
   "A3: each project references exactly its section 3 row and only Doment.Simulation holds Doment.Simulation|t_A3"
-  "A4: each executable prints its name and version on --version and the usage on stderr with exit 2 otherwise|t_A4"
+  "A4: build/check.sh aot publishes the three executables, which print their name and version|t_A4"
+  "A5: the executables restore NativeAOT packages of 10.0.14 or later and the restore has no audit finding|t_A5"
+  "A6: a trim warning fails the aot step, and the warning pattern matches ILC's form|t_A6"
+  "A7: build/check.sh portable builds every portable project for linux-x64 and win-x64|t_A7"
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
   "A15: DomentSimulation=true gives Doment.Cli and Doment.Agent the simulation reference and constant|t_A15"
   "A16: a release publish with simulation fails with DOMENT030; a debug publish succeeds|t_A16"
@@ -494,6 +624,7 @@ TESTS=(
   "A19: build/check.sh leaves no build or test process behind, after success, a timeout or SIGTERM|t_A19"
   "A20: the gate passes on this tree and every platform row is added by the .NET SDK|t_A20"
   "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"
+  "A27: a known-vulnerable package warns in a plain build and fails build/check.sh build|t_A27"
   "A28: each solution project's DomentPlatform matches its module map Kind and only Doment.Agent is linux|t_A28"
 )
 
