@@ -391,6 +391,206 @@ case_sync_linked_worktree() {
   expect_rc 0
 }
 
+CASES+=(pin_mismatch)
+case_pin_mismatch() {
+  synced_setup
+  local c2 text
+  c2=$(framework_commit "$T/darkraise-framework" c2.txt)
+  echo "$c2" > build/darkraise-framework.pin
+  text="DOMENT001: darkraise-framework at $WT is at $C1, but the pin is $c2"
+  dn build src/App
+  expect_rc 0
+  expect_count "warning $text$" 1
+  dn build src/App -p:FrameworkPinStrict=true
+  expect_rc 1
+  expect_count "error $text$" 1
+  dn build src/App -p:TreatWarningsAsErrors=true
+  expect_rc 0
+  expect_count "warning $text$" 1
+  expect_no_out "error $text"
+}
+
+row_modified() { echo '// changed' >> "$WT/src/Darkraise/Class1.cs"; }
+row_staged() { echo staged > "$WT/staged.txt"; git -C "$WT" add staged.txt; }
+row_untracked() { echo '// new' > "$WT/src/Darkraise/New.cs"; }
+row_root_props() { echo '<Project><!-- changed --></Project>' > "$WT/Directory.Build.props"; }
+row_user_file() { echo '<Project />' > "$WT/src/Darkraise/Darkraise.csproj.user"; }
+row_moved_untracked() {
+  ROW_C2=$(framework_commit "$T/darkraise-framework" c2.txt)
+  git -C "$WT" switch -q --detach "$ROW_C2"
+  echo note > "$WT/notes.txt"
+}
+
+CASES+=(pin_not_clean)
+case_pin_not_clean() {
+  CASE_ROOT=$T
+  local row path
+  for row in modified:src/Darkraise/Class1.cs staged:staged.txt untracked:src/Darkraise/New.cs \
+    root_props:Directory.Build.props user_file:src/Darkraise/Darkraise.csproj.user; do
+    path=${row#*:}
+    row=${row%%:*}
+    T=$CASE_ROOT/$row
+    mkdir -p "$T"
+    synced_setup
+    "row_$row"
+    dn build src/App
+    expect_rc 0
+    expect_count "warning DOMENT001: darkraise-framework at $WT is at the pin $C1 but not clean, first: $path$" 1
+    dn build src/App -p:FrameworkPinStrict=true
+    expect_rc 1
+    expect_count "error DOMENT001: darkraise-framework at $WT is at the pin $C1 but not clean, first: $path$" 1
+  done
+
+  T=$CASE_ROOT/moved_untracked
+  mkdir -p "$T"
+  synced_setup
+  row_moved_untracked
+  dn build src/App
+  expect_rc 0
+  expect_count "warning DOMENT001: darkraise-framework at $WT is at $ROW_C2, but the pin is $C1; not clean, first: notes.txt$" 1
+
+  T=$CASE_ROOT/build_output
+  mkdir -p "$T"
+  synced_setup
+  mkdir -p "$WT/src/Darkraise/obj" "$WT/bin"
+  echo x > "$WT/src/Darkraise/obj/x"
+  echo y > "$WT/bin/y"
+  dn build src/App -p:FrameworkPinStrict=true
+  expect_rc 0
+  expect_no_out 'DOMENT001'
+}
+
+CASES+=(pin_unverifiable)
+case_pin_unverifiable() {
+  local c1
+  c1=$(new_framework_repo "$T/darkraise-framework")
+  new_doment_repo "$T/doment" "$c1"
+  cp -r "$T/darkraise-framework" "$T/plain"
+  rm -rf "$T/plain/.git"
+  cd "$T/doment"
+  dn build src/App "-p:DarkraiseFrameworkPath=$T/plain"
+  expect_rc 0
+  expect_count "warning DOMENT002: darkraise-framework at $T/plain cannot be verified: not a git checkout$" 1
+  expect_no_out 'DOMENT001'
+  dn build src/App "-p:DarkraiseFrameworkPath=$T/plain" -p:FrameworkPinStrict=true
+  expect_rc 1
+  expect_count "error DOMENT002: darkraise-framework at $T/plain cannot be verified: not a git checkout$" 1
+
+  cp -r "$T/plain" "$T/doment/external/darkraise-framework"
+  dn build src/App
+  expect_rc 0
+  expect_count "warning DOMENT002: darkraise-framework at $T/doment/external/darkraise-framework cannot be verified: not a git checkout$" 1
+  expect_no_out 'DOMENT001'
+  dn build src/App -p:FrameworkPinStrict=true
+  expect_rc 1
+  expect_count 'error DOMENT002: .* cannot be verified: not a git checkout$' 1
+}
+
+CASES+=(pin_malformed)
+case_pin_malformed() {
+  synced_setup
+  echo abc > build/darkraise-framework.pin
+  dn build src/App
+  expect_rc 1
+  expect_count "error DOMENT006: $T/doment/build/darkraise-framework.pin must hold one full 40-character commit hash$" 1
+}
+
+CASES+=(pin_once_per_build)
+case_pin_once_per_build() {
+  synced_setup
+  local c2
+  c2=$(framework_commit "$T/darkraise-framework" c2.txt)
+  echo "$c2" > build/darkraise-framework.pin
+  write_file src/Lib/Lib.csproj <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(DarkraiseFrameworkPath)/src/Darkraise/Darkraise.csproj" />
+  </ItemGroup>
+</Project>
+XML
+  write_file App.slnx <<'XML'
+<Solution>
+  <Project Path="src/App/App.csproj" />
+  <Project Path="src/Lib/Lib.csproj" />
+</Solution>
+XML
+  dn build App.slnx -m
+  expect_rc 0
+  expect_count 'warning DOMENT001' 1
+}
+
+CASES+=(two_pins_strict)
+case_two_pins_strict() {
+  synced_setup
+  local c2
+  c2=$(framework_commit "$T/darkraise-framework" c2.txt)
+  git -C "$T/doment" worktree add -q -b linked "$T/doment-wt"
+  cd "$T/doment-wt"
+  echo "$c2" > build/darkraise-framework.pin
+  fw_sh sync
+  expect_rc 0
+  dn build src/App -p:FrameworkPinStrict=true
+  expect_rc 0
+  expect_no_out 'DOMENT001'
+  cd "$T/doment"
+  dn build src/App -p:FrameworkPinStrict=true
+  expect_rc 0
+  expect_no_out 'DOMENT001'
+  # Control: the primary checkout's worktree checked against the linked checkout's pin fails.
+  dn build src/App -p:FrameworkPinStrict=true "-p:DomentFrameworkPinFile=$T/doment-wt/build/darkraise-framework.pin"
+  expect_rc 1
+  expect_count "error DOMENT001: darkraise-framework at $WT is at $C1, but the pin is $c2$" 1
+}
+
+# Comma-separated IDs of the libraries of type package in a project.assets.json.
+assets_packages() {
+  awk '
+    /^  "libraries": \{/ { inlib = 1; next }
+    inlib && /^  \}/ { inlib = 0 }
+    inlib && /^    "[^"]+\/[^"]+": \{/ { key = $0; sub(/^    "/, "", key); sub(/\/.*/, "", key); next }
+    inlib && /"type": "package"/ { ids = ids (ids == "" ? "" : ",") key }
+    END { print ids }
+  ' "$1"
+}
+
+CASES+=(real_framework_strict)
+case_real_framework_strict() {
+  local fw=$REPO_ROOT/external/darkraise-framework
+  [[ -d $fw ]] || fail "no framework worktree at $fw; run tools/framework.sh sync"
+  mkdir -p "$T/real"
+  printf '<Project>\n  <Import Project="%s/Directory.Build.props" />\n</Project>\n' "$REPO_ROOT" > "$T/real/Directory.Build.props"
+  printf '<Project>\n  <Import Project="%s/Directory.Build.targets" />\n</Project>\n' "$REPO_ROOT" > "$T/real/Directory.Build.targets"
+  write_file "$T/real/Real.csproj" <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(DarkraiseFrameworkPath)/src/Darkraise/Darkraise.csproj" />
+  </ItemGroup>
+</Project>
+XML
+  cd "$T/real"
+  dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
+    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages"
+  expect_rc 0
+  expect_no_out 'DOMENT'
+  local packages
+  packages=$(assets_packages "$T/real/obj/project.assets.json")
+  # Control: the same build against another pin fails, so the check did run on the real framework.
+  printf '%040d\n' 0 > "$T/other.pin"
+  dn build Real.csproj -p:FrameworkPinStrict=true "-p:DarkraiseFrameworkPath=$fw" \
+    "-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages" "-p:DomentFrameworkPinFile=$T/other.pin"
+  expect_rc 1
+  expect_count "error DOMENT001: darkraise-framework at $fw is at [0-9a-f]{40}, but the pin is 0{40}$" 1
+  echo "note real_framework_strict: packages: ${packages:-none}"
+  cd "$T"
+  rm -rf "$T/real"
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 

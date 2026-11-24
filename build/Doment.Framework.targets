@@ -9,6 +9,18 @@
     <_DomentFrameworkCheckRemoved>TargetFramework;RuntimeIdentifier;SelfContained;Configuration;Platform;SolutionDir</_DomentFrameworkCheckRemoved>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <MSBuildWarningsNotAsErrors>$(MSBuildWarningsNotAsErrors);DOMENT001;DOMENT002</MSBuildWarningsNotAsErrors>
+  </PropertyGroup>
+
+  <UsingTask TaskName="DomentFrameworkState"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)Doment.BuildChecks.cs" />
+    </Task>
+  </UsingTask>
+
   <Target Name="DomentPresenceCheck"
           BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences"
           Condition="'$(DomentCheckPathSource)' == ''">
@@ -31,5 +43,19 @@
     <Error Code="DOMENT003"
            Condition="!Exists('$(DomentCheckPath)')"
            Text="darkraise-framework not found at $(_DomentCheckShownPath); run tools/framework.sh sync" />
+  </Target>
+
+  <Target Name="DomentFrameworkCheck"
+          BeforeTargets="CoreCompile"
+          DependsOnTargets="DomentPresenceCheck"
+          Condition="'$(DomentCheckPathSource)' == ''">
+    <MSBuild Projects="$(MSBuildThisFileFullPath)"
+             Targets="_DomentFrameworkState"
+             Properties="$(_DomentFrameworkCheckProperties)"
+             RemoveProperties="$(_DomentFrameworkCheckRemoved)" />
+  </Target>
+
+  <Target Name="_DomentFrameworkState" DependsOnTargets="_DomentPresenceCheck">
+    <DomentFrameworkState FrameworkPath="$(DomentCheckPath)" PinFile="$(DomentCheckPinFile)" Strict="$(DomentCheckStrict)" />
   </Target>
 </Project>
