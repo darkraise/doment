@@ -38,6 +38,12 @@ Questions put to the owner on 2026-11-24, with the answers quoted.
 
 CI: none exists yet (the "CI for pushed branches" epic adds it), so no platform is uncovered.
 
+Spec review, 2026-11-24: owner: "Approve and run unattended".
+
+Finish: merge
+
+Worktree: worktree
+
 ## 1. What this epic delivers
 
 - The pinned toolchain: SDK 10.0.404 on this machine and in `global.json`, and clang for the NativeAOT link step.
