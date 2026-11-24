@@ -10,3 +10,4 @@
 | 3 | Synthetic and recorded media sources | Synthetic and recorded media sources | R25-R26 | open | - |
 | 4 | Encoder control logic | Encoder control logic | R27-R28 | open | - |
 | 5 | Statistics and diagnostics | Statistics and diagnostics | R29-R30 | open | - |
+| 6 | Local worker link | Local worker link | R176 | open | - |

@@ -90,9 +90,10 @@ billing, a browser client, and shared sessions with guests. Each would enter as 
   Deck, macOS and iOS clients, and macOS and Linux desktop hosts. The portable core compiles for all of them from M1.
 - **Windows floor:** Windows 11 x64 for host and client in 1.0. The framework is designed and tested on
   Windows 11, and Windows 10 is past its end of support.
-- **Third-party rule:** first-party by default. A third-party component is allowed only as a named exception approved in
-  this spec, with a reason, an interface around it and a replacement plan (section 11). GPU encoder interfaces (NVENC,
-  Quick Sync) ship inside the installed GPU driver, are not redistributed, and count as platform APIs.
+- **Third-party rule:** first-party by default. A third-party component is allowed only as a named exception approved by
+  the owner and listed in docs/third-party-exceptions.md, with a reason, an interface around it and a replacement plan.
+  GPU encoder interfaces (NVENC, Quick Sync) ship inside the installed GPU driver, are not redistributed, and count as
+  platform APIs.
 - **Drivers:** version 1.0 uses existing signed open-source drivers for the virtual display and the virtual gamepad;
   first-party drivers come in M17. No microphone passthrough before M17. Drivers are C or C++, outside the C# rule.
 - **Self-hosted:** no doment-run cloud. The owner runs the server. LAN, direct-address and VPN connections work with no
@@ -112,10 +113,10 @@ Each requirement is a statement a test or a demonstration can check, and belongs
 
 **Architecture decisions**
 
-- **R1** The process model (system service, per-session agent, client, self-hosted server, shared portable core) and the module boundaries are recorded, with one named interface per platform seam: capture, video encode, video decode, presentation, audio capture, audio playback, input injection, virtual display, virtual gamepad, pseudo-terminal.
+- **R1** The process model (system service, per-session agent, terminal host, client, self-hosted server, shared portable core) and the module boundaries are recorded, with one named interface per platform seam: capture, video encode, video decode, presentation, audio capture, audio playback, input injection, virtual display, virtual gamepad, pseudo-terminal.
 - **R2** The build order is recorded: which projects are portable and built first on Linux and which are Windows-bound; Windows-bound code is reached only through the platform seams, and every seam has a simulated implementation used by tests.
 - **R3** How doment consumes darkraise-framework is decided and recorded (package or project reference, version pinning), with the rule that reusable, product-neutral pieces are contributed to the framework and product logic stays in doment.
-- **R4** A third-party exception register lists every component that is not doment code, darkraise-framework, .NET, an operating-system API or a GPU-driver interface, each with its reason, licence, the interface it sits behind and its replacement plan; the build fails on a dependency that is not listed.
+- **R4** A third-party exception register lists every component that is not doment code, darkraise-framework, .NET, an operating-system API or a GPU-driver interface, each with its reason, licence, the interface it sits behind and its replacement plan; the build fails on a dependency that is not listed; build-and-test-only tools are listed in a separate class with what they are used for, their licence and the approval date, and never reach a shipped binary.
 
 **Repository, build and NativeAOT**
 
@@ -178,6 +179,10 @@ Each requirement is a statement a test or a demonstration can check, and belongs
 
 - **R29** Per-stage latency, frame rate, bitrate, loss, codec, chroma format and connection path are collected and exposed in machine-readable form.
 - **R30** Every doment process writes structured logs and can export a diagnostic bundle.
+
+**Local worker link**
+
+- **R176** The host service reaches the session agent and the terminal host only through the worker link, which has an in-process and a cross-process implementation on Linux; the cross-process one passes its contract suite with the worker killed, hung, restarted, running a version outside the supported range, and sending malformed data, and with the ring full.
 
 
 ### M3 Internet connectivity and self-hosted server
@@ -353,7 +358,7 @@ Each requirement is a statement a test or a demonstration can check, and belongs
 
 **Windows terminal host**
 
-- **R104** The Windows host service owns terminal sessions through the pseudo-console with the same persistence behaviour as the Linux agent, and every session's process tree is in a job object.
+- **R104** The Windows terminal host owns terminal sessions through the pseudo-console with the same persistence behaviour as on Linux, and every session's process tree is in a job object.
 - **R105** Shells run in the interactive user's token, not as SYSTEM; an elevated session needs an explicit action on the host and is labelled as elevated.
 - **R106** Profiles cover PowerShell, cmd and a WSL distribution, and WSL stays alive while one of its sessions exists.
 - **R107** Pseudo-console teardown and resize behave correctly on supported Windows builds, proven by the conformance suite run against PowerShell, cmd, WSL, vim and Claude Code.
@@ -594,6 +599,7 @@ An epic is one spec, one or more plans, and can be demonstrated on its own.
 | M2 | Synthetic and recorded media sources | R25-R26 |
 | M2 | Encoder control logic | R27-R28 |
 | M2 | Statistics and diagnostics | R29-R30 |
+| M2 | Local worker link | R176 |
 | M3 | Self-hosted server | R31-R33 |
 | M3 | Direct-first NAT traversal | R34-R36 |
 | M3 | Encrypted relay | R37-R39 |
@@ -711,7 +717,7 @@ Each row is a documented failure from the research and the epic that answers it.
 | Agent configuration outside the signed part of the installer | ScreenConnect 2025 | Enrolment token inside a signed blob (Enrolment of supported PCs) |
 | Signing keys stolen with the build systems | AnyDesk 2024 | Key in a hardware token or signing service apart from the build machine (Code signing) |
 | Setup endpoint reachable after setup | ScreenConnect 2024 | Setup endpoints disabled after first run (Self-hosted server) |
-| Terminal sessions vanish when the viewer disconnects; Windows shells die with the connection | Claude Code Remote Control, SSH on Windows | The host service owns the pseudo-console and the session list (Host terminal service, Terminal channel and persistence) |
+| Terminal sessions vanish when the viewer disconnects; Windows shells die with the connection | Claude Code Remote Control, SSH on Windows | The terminal host owns the pseudo-console and the session list (Host terminal service, Terminal channel and persistence) |
 | Agent managers are macOS-first, single-vendor, and get abandoned | Crystal, Vibe Kanban, Omnara | Linux and Windows hosts, plain shells and any agent, self-hosted (Session inventory and states, Coding agent awareness) |
 | Notifications without context | several agent managers | Notification names the session, the host and the question (Coding agent awareness) |
 | Wake-on-LAN fails silently; no helper on the LAN; unknown MAC address | TeamViewer, RustDesk, AnyDesk | Helper fallback, recorded MAC, every step reported, readiness self-check (Wake-on-LAN) |
@@ -721,8 +727,10 @@ Each row is a documented failure from the research and the epic that answers it.
 
 Known so far; each open decision is settled inside its epic through dforge:selecting-approaches.
 
-- **Processes.** A host service (SYSTEM) that owns terminal sessions and supervises a per-session agent; the agent
-  captures, encodes, injects input and captures audio in the console session; a Win32UI client; a self-hosted server
+- **Processes.** A host service (SYSTEM) that is the only network endpoint and supervises a per-session agent; the
+  session agent owns everything that needs the interactive session, and captures, encodes, injects input and captures
+  audio in the console session; a terminal host process, separate from the service and running as the user, owns the
+  pseudo-terminals and the terminal state; a Win32UI client; a self-hosted server
   (directory, connection brokering, relay, wake helper). A shared portable core (net10.0) holds the protocol,
   cryptography, transport, error correction, congestion control, terminal state model and bitstream parsers.
 - **Platform seams.** Capture, encode, decode, presentation, audio, input, virtual display, virtual gamepad and
@@ -739,7 +747,8 @@ Known so far; each open decision is settled inside its epic through dforge:selec
 - **Build order.** The portable core, server, Linux agent and command-line client are built and verified on Linux
   first, against simulated implementations of every platform seam. The Windows implementations and the Win32UI app are
   added from M7 without changing the core.
-- **Terminals.** The host service owns the pseudo-console and keeps a headless terminal state for snapshots; clients
+- **Terminals.** A terminal host process, separate from the service and running as the user, owns the
+  pseudo-terminals and keeps the headless terminal state for snapshots; clients
   render with a new Win32UI terminal control. Terminals are text, not pixels.
 - **Real-time discipline.** Dedicated threads with multimedia scheduling, no allocations on the steady-state media path,
   high-resolution timers.
@@ -748,16 +757,17 @@ Known so far; each open decision is settled inside its epic through dforge:selec
   M12; doment needs a low-latency audio codec sooner, so the two plans must be reconciled in that epic.
 
 Open decisions: the 4:4:4 technique for AMD clients; whether Direct3D 12 video encode is added as a vendor-neutral path
-beside the NVENC and Quick Sync interfaces the requirements commit to; how doment references the framework; the UI stack for mobile, Linux and macOS clients (Win32UI is Windows-only).
+beside the NVENC and Quick Sync interfaces the requirements commit to; the UI stack for mobile, Linux and macOS clients (Win32UI is Windows-only).
 
-## 11. Third-party exception register (initial)
+## 11. Third-party exception register
 
-| # | Component | Used for | Reason | Behind | Replacement |
-|---|---|---|---|---|---|
-| X1 | An existing signed open-source Indirect Display driver (candidate: the community Virtual Display Driver; licence and signature validity confirmed in the epic) | Virtual display | Windows has no built-in virtual display; a driver must be signed through Microsoft | Virtual-display interface | M17 first-party driver |
-| X2 | ViGEmBus (archived in 2023, still signed and working) | Virtual gamepad | No driverless way exists for XInput games to see a controller | Virtual-gamepad interface | M17 first-party driver |
+The register is `docs/third-party-exceptions.md`. It holds the approved exceptions, X1 (an existing signed Indirect
+Display driver for the virtual display) and X2 (ViGEmBus for the virtual gamepad), each with its reason, licence,
+interface and M17 replacement; the build-and-test-only tools; and the platform packages the .NET SDK adds. The build
+fails on a package it does not list.
 
-Nothing else is excepted. Adding an entry needs the owner's approval.
+Nothing else may ship; build-and-test-only tools are a separate class in the register. Adding an entry needs the
+owner's approval.
 
 ## 12. Risks
 
