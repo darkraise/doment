@@ -239,7 +239,9 @@ responsibility: the check reads doment assemblies only.
 build/check.sh [<step>...]      steps: build, portable, aot, test; default: all four in this order
 ```
 
-- Works on the repository that holds the script and takes everything from that tree: the solution is `doment.slnx`
+- Works on the tree that holds the script, whose root is the parent of the script's own directory, found without
+  git (so a copy of the script in a stand-in tree under `artifacts/`, which git would resolve to the enclosing
+  checkout, works on the stand-in), and takes everything from that tree: the solution is `doment.slnx`
   at its root; the aot step publishes each project of that solution whose `PublishAot` is `true` (read with
   `-getProperty`), expects the binary named by its `AssemblyName`, and expects the version in its `VersionPrefix`.
   Nothing in the script names a doment project or `0.1.0`.
@@ -261,7 +263,7 @@ build/check.sh [<step>...]      steps: build, portable, aot, test; default: all 
 - Prints `check: <step> ok`, or `check: <step> failed` followed by the cause, and stops at the first failed step. The
   cause is: the call's deduplicated `error` lines for a failed call, or the last 20 lines of its output when it has
   none (a failing test, for one); the matched warning lines for a publish that
-  exited 0 with warnings; the binary's exit code and first output line beside the expected `<name> 0.1.0` for a
+  exited 0 with warnings; the binary's exit code and first output line beside the expected `<name> <version>` for a
   `--version` mismatch; `timed out after <s> s: <command>` for a timeout. Last line: `check: <n> steps run, <f> failed`. Exits 0 when every step passed, 1 on a failure, 2 on
   an unknown step.
 - The gate is not one of its steps; the "Gates declared" epic lists both commands.
@@ -331,10 +333,11 @@ Each gets a register row update: assigned to this spec, then done with its accep
   project, and `DARKRAISE_FRAMEWORK_PATH` set to the real framework worktree with a copy of the pin. It restores from
   the user's normal sources and package folder. A6 and A27 run that tree's copy of `build/check.sh`; A27's stand-in
   register lists the vulnerable package, so the failure is the advisory and not DOMENT010.
-- A18's failing step needs no stand-in: `DARKRAISE_FRAMEWORK_PATH=/nonexistent build/check.sh build` fails with
-  DOMENT003.
+- A18's failing step needs no stand-in: `DARKRAISE_FRAMEWORK_PATH=/nonexistent build/check.sh` fails the build step
+  with DOMENT003 and runs no later step. The format check may not run inside the stand-in under `artifacts/`, which
+  `.csharpierignore` lists; A6 and A27 do not depend on it.
 - **Repository acceptance**, `tests/build/repository-build.acceptance.sh`, one function per acceptance statement
-  that a script can check, on the real checkout: the solution builds clean, the module references equal the table in
+  that a script can check, on the real checkout (and, for the cases of the next bullet, on a stand-in tree): the solution builds clean, the module references equal the table in
   section 3, `build/check.sh` passes, the published binaries answer `--version`, the editorconfig matches the
   framework's apart from the documented changes, and every tracked text file is LF.
 - **Unit tests** in `Doment.Core.Tests` for the name-and-version type.
@@ -363,7 +366,7 @@ A14. [test, neg, high] A project that sets `DomentFormatCheck=false` or `DomentP
 A15. [test, high] Building `Doment.Cli` or `Doment.Agent` with `-p:DomentSimulation=true` adds `Doment.Simulation` to its references and defines `DOMENT_SIMULATION`; without the property neither does.
 A16. [test, neg, high] `dotnet publish -c Release -p:DomentSimulation=true` of `Doment.Cli` or `Doment.Agent` fails with DOMENT030; the same build in Debug succeeds; a Release publish of a fixture that references a project named `Doment.Simulation` without the property also fails with DOMENT030.
 A17. [test, high] `build/check.sh test` runs the solution's tests under Microsoft Testing Platform with xUnit v3 and passes, including the tests of the name-and-version type, and the test executable reports runtime 10.0.14 or later.
-A18. [test, high] `build/check.sh` with no argument runs build, portable, aot and test in that order, prints one `check: <step> ok` line per step and `check: 4 steps run, 0 failed`, and exits 0; with a step made to fail it stops there and exits 1; with an unknown step it exits 2.
+A18. [test, high] `build/check.sh` with no argument runs build, portable, aot and test in that order, prints one `check: <step> ok` line per step and `check: 4 steps run, 0 failed`, and exits 0; run with no argument and `DARKRAISE_FRAMEWORK_PATH=/nonexistent`, it prints `check: build failed` with DOMENT003, runs no further step, and exits 1; with an unknown step it exits 2.
 A19. [test, neg, high] After `build/check.sh` returns, no MSBuild node, MSBuild server, compiler server, ILC or test host process that it started is still running, both after a normal run and after a run of the build step with `DOMENT_CHECK_TIMEOUT=1`, which prints `timed out after 1 s` and exits 1, and after `check.sh` receives SIGTERM during the build step.
 A20. [test, high] `build/gate.sh` on the repository reports 0 violations with the new projects, and every platform-packages row added by this epic names a package the .NET SDK adds.
 A21. [test, high] Every tracked text file is LF in the index, and `git check-attr eol` reports `lf` for `*.sh`, `*.cs`, `*.csproj`, `*.md` and the pin file, and `git check-attr text` reports `unset` for the listed binary types (row #6).
@@ -372,7 +375,7 @@ A23. [test, neg, high] The gate run on a tree holding one project, at a path con
 A24. [test, neg, high] On `master`, with the framework path a plain directory inside another git repository, the gate reports DOMENT002 and no DOMENT005 and fetches nothing; with a `git` wrapper on PATH that fails the first, second or third `ls-files` call, the gate exits 1 with `gate: git ls-files failed in <tree>` each time (row #9).
 A25. [test, high] `tests/build/run.sh` and `tests/build/architecture-decisions.acceptance.sh` pass after the change.
 A26. [demo, high] `docs/architecture.md` records the toolchain, the solution, the four properties, `build/check.sh`, DOMENT030 to DOMENT033, the gate fixes and the rules handed to later epics of section 9, and `README.md` gives the prerequisites and the two commands.
-A27. [test, neg, high] With a package that has a known advisory in a project's restore output, a plain `dotnet build` succeeds with an NU190x warning, and `build/check.sh build` fails naming the advisory.
+A27. [test, neg, high] With a package that has a known advisory in a project's restore output, a plain `dotnet build` succeeds with an NU190x warning, and the stand-in tree's copy of `build/check.sh build` fails naming the advisory.
 A28. [test, high] Each project's `DomentPlatform`, read with `-getProperty`, equals its Kind in the module map of `docs/architecture.md`, and `Doment.Agent` is the only `linux` project.
 
 ## Riskiest assumption
@@ -478,3 +481,8 @@ The undecided item (the CSharpier version) was settled by evidence: decision 7.
 - 26. The post-compile DOMENT033 target skips design-time builds and writes no stamp (section 5).
 - 27. `gate_repository` needs a warm package cache (section 10).
 - 28. `doment.exe` and `Doment.exe` never share a directory, handed to M8 (section 9).
+
+Fable spec review, round 2, 2026-11-24 (ruling 5 only): resolved; 0 Blocker, 0 High open. Residue applied: the
+script's root is the parent of its directory, found without git (section 7); the `--version` cause names
+`<version>`; A18 fails a no-argument run; A27 and section 10 name the stand-in tree; the format check may be inert in
+the stand-in.
