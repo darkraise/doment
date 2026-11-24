@@ -419,6 +419,7 @@ public sealed class DomentAssets
         }
         var packageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var libraries = root.Get("libraries") as DomentJson.Obj;
+        var projectLibraries = new List<KeyValuePair<string, string>>();
         if (libraries != null)
         {
             foreach (KeyValuePair<string, object> library in libraries.Members)
@@ -432,11 +433,12 @@ public sealed class DomentAssets
                 }
                 else if (type == "project")
                 {
-                    assets.directProjects.Add(id);
+                    projectLibraries.Add(new KeyValuePair<string, string>(id, body.Get("path") as string));
                 }
             }
         }
         var project = root.Get("project") as DomentJson.Obj;
+        AddDirectProjects(assets, project, projectLibraries);
         var frameworks = project == null ? null : project.Get("frameworks") as DomentJson.Obj;
         if (frameworks != null)
         {
@@ -492,6 +494,41 @@ public sealed class DomentAssets
     }
 
     // "direct reference", "through <direct package id>" or "through project <project name>":
+    // `libraries` lists every project in the restore closure, so only those named under
+    // project.restore.frameworks.*.projectReferences are direct; their `path` is relative to the project.
+    private static void AddDirectProjects(DomentAssets assets, DomentJson.Obj project,
+        List<KeyValuePair<string, string>> projectLibraries)
+    {
+        var restore = project == null ? null : project.Get("restore") as DomentJson.Obj;
+        string projectPath = restore == null ? null : restore.Get("projectPath") as string;
+        var frameworks = restore == null ? null : restore.Get("frameworks") as DomentJson.Obj;
+        if (string.IsNullOrEmpty(projectPath) || frameworks == null)
+        {
+            return;
+        }
+        var direct = new HashSet<string>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, object> framework in frameworks.Members)
+        {
+            var body = framework.Value as DomentJson.Obj;
+            var references = body == null ? null : body.Get("projectReferences") as DomentJson.Obj;
+            if (references != null)
+            {
+                foreach (KeyValuePair<string, object> reference in references.Members)
+                {
+                    direct.Add(Path.GetFullPath(reference.Key));
+                }
+            }
+        }
+        string projectDirectory = Path.GetDirectoryName(projectPath);
+        foreach (KeyValuePair<string, string> library in projectLibraries)
+        {
+            if (library.Value != null && direct.Contains(Path.GetFullPath(Path.Combine(projectDirectory, library.Value))))
+            {
+                assets.directProjects.Add(library.Key);
+            }
+        }
+    }
+
     // the first direct reference, in the order of the assets file, whose closure holds the package.
     public string HowArrived(string id)
     {

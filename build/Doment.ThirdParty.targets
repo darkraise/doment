@@ -1,4 +1,10 @@
 <Project>
+  <!-- Set again here, after the project body, so a project cannot classify itself as build-only. -->
+  <PropertyGroup>
+    <DomentBuildOnly>false</DomentBuildOnly>
+    <DomentBuildOnly Condition="$(_DomentProjectRelativePath.StartsWith('tests/')) or $(_DomentProjectRelativePath.StartsWith('tools/'))">true</DomentBuildOnly>
+  </PropertyGroup>
+
   <UsingTask TaskName="DomentThirdPartyCheck"
              TaskFactory="RoslynCodeTaskFactory"
              AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">

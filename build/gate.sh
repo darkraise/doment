@@ -37,6 +37,11 @@ dn() {
   OUT=$(timeout 600 dotnet "$@" "${DN_FLAGS[@]}" 2>&1) && RC=0 || RC=$?
 }
 
+die() {
+  echo "gate: $*" >&2
+  exit 1
+}
+
 violation() {
   printf '%s\n' "$1" >> "$VIOLATIONS"
 }
@@ -55,14 +60,14 @@ collect() {
   fi
 }
 
+git -C "$TREE" ls-files -z -- '*.csproj' '*.fsproj' '*.vbproj' > "$TMP/projects" || die "git ls-files failed in $TREE"
 PROJECTS=()
 while IFS= read -r -d '' path; do
   [[ $path == tests/build/fixtures/* ]] && continue
   PROJECTS+=("$path")
-done < <(git -C "$TREE" ls-files -z -- '*.csproj' '*.fsproj' '*.vbproj')
+done < "$TMP/projects"
 
 packages=0
-first_importing=
 for path in "${PROJECTS[@]}"; do
   project=$TREE/$path
   dn msbuild "$project" -getProperty:DomentRootTargetsImported
@@ -74,27 +79,31 @@ for path in "${PROJECTS[@]}"; do
     violation "error DOMENT020: $project does not import the root Directory.Build.targets"
     continue
   fi
-  [[ -n $first_importing ]] || first_importing=$project
-  dn msbuild "$project" -restore -t:DomentThirdPartyCheck -p:FrameworkPinStrict=true
+  # The register is passed globally so that a project cannot point its check at another file.
+  dn msbuild "$project" -restore -t:DomentThirdPartyCheck -p:FrameworkPinStrict=true "-p:DomentRegisterFile=$REGISTER"
   collect "checking the packages of $project"
   count=$(grep -oE 'DOMENT-PACKAGES: [0-9]+' <<<"$OUT" | head -n 1 | grep -oE '[0-9]+$' || true)
   packages=$((packages + ${count:-0}))
 done
 
-if [[ -n $first_importing ]]; then
-  dn msbuild "$first_importing" -t:DomentFrameworkCheck -p:FrameworkPinStrict=true
-  collect "checking the framework from $first_importing"
-fi
+# The framework check is the same for the whole tree, and runs even when the tree has no project.
+FRAMEWORK_PROJECT=$TMP/framework-check.proj
+printf '<Project>\n  <Import Project="%s/Directory.Build.props" />\n  <Import Project="%s/Directory.Build.targets" />\n</Project>\n' \
+  "$TREE" "$TREE" > "$FRAMEWORK_PROJECT"
+dn msbuild "$FRAMEWORK_PROJECT" -t:DomentFrameworkCheck -p:FrameworkPinStrict=true
+collect "checking the framework"
 
+git -C "$TREE" ls-files -z > "$TMP/files" || die "git ls-files failed in $TREE"
 BINARIES=$TMP/binaries
 : > "$BINARIES"
 while IFS= read -r -d '' path; do
   case ${path,,} in
     *.dll | *.exe | *.so | *.dylib | *.a | *.lib | *.sys | *.nupkg | *.snupkg) printf '%s\0' "$path" >> "$BINARIES" ;;
   esac
-done < <(git -C "$TREE" ls-files -z)
+done < "$TMP/files"
+git -C "$TREE" ls-files -- .config/dotnet-tools.json > "$TMP/manifest" || die "git ls-files failed in $TREE"
 manifest=
-[[ -n $(git -C "$TREE" ls-files -- .config/dotnet-tools.json) ]] && manifest=.config/dotnet-tools.json
+[[ -s $TMP/manifest ]] && manifest=.config/dotnet-tools.json
 dn msbuild "$SCRIPT_DIR/Gate.proj" -t:DomentGateFiles "-p:DomentGateTree=$TREE" "-p:DomentGateRegister=$REGISTER" \
   "-p:DomentGateBinaryList=$BINARIES" "-p:DomentGateToolManifest=$manifest"
 collect "checking the tracked files"
@@ -106,11 +115,14 @@ if [[ $branch == master || $branch == main ]]; then
   pin_file=$TREE/build/darkraise-framework.pin
   pin=
   [[ -f $pin_file ]] && pin=$(<"$pin_file")
+  pin=${pin%$'\r'}
   # These two lines match the build's own DOMENT006 and DOMENT003 text, so they merge with them.
   if [[ ! $pin =~ ^[0-9a-f]{40}$ ]]; then
     violation "error DOMENT006: $pin_file must hold one full 40-character commit hash"
   elif [[ ! -d $framework ]]; then
     violation "error DOMENT003: darkraise-framework not found at $framework; run tools/framework.sh sync"
+  elif ! prefix=$(git -C "$framework" rev-parse --show-prefix 2>/dev/null) || [[ -n $prefix ]]; then
+    : # Not a git checkout of its own: the framework check reports DOMENT002, and git here would read the enclosing repository.
   else
     if [[ ${DOMENT_GATE_NO_FETCH:-} != 1 ]]; then
       timeout 120 git -C "$framework" fetch --quiet origin ||

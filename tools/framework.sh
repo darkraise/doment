@@ -79,6 +79,7 @@ read_pin() {
   [[ -f $PIN_FILE ]] || die "$PIN_FILE must hold one full 40-character commit hash"
   local content
   content=$(<"$PIN_FILE")
+  content=${content%$'\r'}
   [[ $content =~ ^[0-9a-f]{40}$ ]] || die "$PIN_FILE must hold one full 40-character commit hash"
   PIN=$content
 }
@@ -102,7 +103,7 @@ check_is_framework_worktree() {
 # Sets FIRST_UNCLEAN to the first path that makes the worktree not clean (Global Constraints),
 # or to the empty string. Called directly, not in $(...), so a git failure stops the script.
 first_unclean_path() {
-  local status_file entry code path segment skip_next=0
+  local status_file entry code path segment segments skip_next=0
   FIRST_UNCLEAN=
   status_file=$(mktemp)
   TMP_FILES+=("$status_file")
@@ -160,11 +161,11 @@ cmd_sync() {
     check_clean
     check_reachable
     ensure_pin_commit
-    git -C "$WORKTREE" switch --quiet --detach "$PIN"
+    git -C "$WORKTREE" switch --quiet --detach "$PIN" || die "git switch to $PIN failed in $WORKTREE"
   else
     ensure_pin_commit
     mkdir -p "$(dirname "$WORKTREE")"
-    git -C "$CLONE" worktree add --quiet --detach "$WORKTREE" "$PIN"
+    git -C "$CLONE" worktree add --quiet --detach "$WORKTREE" "$PIN" || die "git worktree add $WORKTREE failed in $CLONE"
   fi
   echo "framework.sh: $WORKTREE is at $PIN" >&2
 }
@@ -197,7 +198,7 @@ cmd_release() {
   check_is_framework_worktree
   check_clean
   check_reachable
-  git -C "$CLONE" worktree remove "$WORKTREE"
+  git -C "$CLONE" worktree remove "$WORKTREE" || die "git worktree remove $WORKTREE failed in $CLONE"
   echo "framework.sh: removed $WORKTREE" >&2
 }
 
