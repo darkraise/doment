@@ -6,4 +6,5 @@
   <Import Project="$(MSBuildThisFileDirectory)build/Doment.Framework.targets" />
   <Import Project="$(MSBuildThisFileDirectory)build/Doment.ThirdParty.targets" />
   <Import Project="$(MSBuildThisFileDirectory)build/Doment.Format.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)build/Doment.Simulation.targets" />
 </Project>

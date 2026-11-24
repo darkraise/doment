@@ -222,6 +222,42 @@ t_A4() {
   done
 }
 
+SIMULATION_HOSTS=(src/Doment.Cli/Doment.Cli.csproj src/Doment.Agent/Doment.Agent.csproj)
+
+t_A15() {
+  local proj refs defines
+  for proj in "${SIMULATION_HOSTS[@]}"; do
+    case_ "$proj with DomentSimulation=true"
+    refs=$(msb_items "$proj" ProjectReference -p:DomentSimulation=true)
+    grep -qx 'Doment.Simulation.csproj' <<<"$refs" || note "no Doment.Simulation.csproj among the references: $(paste -sd ' ' <<<"$refs")"
+    defines=$(cd "$REPO_ROOT" && timeout 600 dotnet msbuild "$proj" -nologo -getProperty:DefineConstants -p:DomentSimulation=true 2>&1)
+    grep -Eq '(^|;)DOMENT_SIMULATION(;|$)' <<<"$defines" || note "DefineConstants lacks DOMENT_SIMULATION: $defines"
+
+    case_ "$proj without the property"
+    refs=$(msb_items "$proj" ProjectReference)
+    if grep -qx 'Doment.Simulation.csproj' <<<"$refs"; then note "Doment.Simulation.csproj is referenced"; fi
+    defines=$(cd "$REPO_ROOT" && timeout 600 dotnet msbuild "$proj" -nologo -getProperty:DefineConstants 2>&1)
+    if grep -q 'DOMENT_SIMULATION' <<<"$defines"; then note "DefineConstants holds DOMENT_SIMULATION: $defines"; fi
+  done
+}
+
+t_A16() {
+  local proj name
+  for proj in "${SIMULATION_HOSTS[@]}"; do
+    name=$(basename "$proj" .csproj)
+    case_ "$name release publish"
+    dn "$REPO_ROOT" publish "$proj" -c Release -r linux-x64 -p:DomentSimulation=true
+    rc_fails
+    has 'error DOMENT030: a release publish cannot include Doment\.Simulation; build simulation binaries in Debug'
+
+    case_ "$name debug publish"
+    dn "$REPO_ROOT" publish "$proj" -c Debug -r linux-x64 -p:DomentSimulation=true -o "artifacts/acceptance/a16/$name"
+    rc_is 0
+    hasnt 'DOMENT030'
+  done
+  rm -rf "$REPO_ROOT/artifacts/acceptance/a16"
+}
+
 t_A17() {
   case_ "dotnet test"
   [[ -f $REPO_ROOT/doment.slnx ]] || { note "no doment.slnx at the repository root"; return 0; }
@@ -311,6 +347,8 @@ TESTS=(
   "A3: each project references exactly its section 3 row and only Doment.Simulation holds Doment.Simulation|t_A3"
   "A4: each executable prints its name and version on --version and the usage on stderr with exit 2 otherwise|t_A4"
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
+  "A15: DomentSimulation=true gives Doment.Cli and Doment.Agent the simulation reference and constant|t_A15"
+  "A16: a release publish with simulation fails with DOMENT030; a debug publish succeeds|t_A16"
   "A17: dotnet test runs the solution's five tests on the testing platform|t_A17"
   "A20: the gate passes on this tree and every platform row is added by the .NET SDK|t_A20"
   "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"

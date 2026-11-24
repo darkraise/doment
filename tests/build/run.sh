@@ -1490,6 +1490,55 @@ SH
   done
 }
 
+# simulation_app <case> <dir> <reference XML>: a console project at <dir> of the case's fixture tree.
+simulation_app() {
+  local root=$FIXTURE_RUN/$1
+  write_file "$root/$2/$(basename "$2").csproj" <<XML
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup$3
+  </ItemGroup>
+</Project>
+XML
+  printf 'System.Console.WriteLine("app");\n' > "$root/$2/Program.cs"
+}
+
+SIMULATION_ERROR='error DOMENT030: a release publish cannot include Doment\.Simulation; build simulation binaries in Debug( \[|$)'
+
+CASES+=(simulation_release_publish)
+case_simulation_release_publish() {
+  local root=$FIXTURE_RUN/simulation_release_publish
+  fixture_project simulation_release_publish src/Doment.Simulation net10.0
+  simulation_app simulation_release_publish src/App \
+    $' Condition="\'$(DomentSimulation)\' == \'true\'">\n    <ProjectReference Include="../Doment.Simulation/Doment.Simulation.csproj" />'
+  dn publish "$root/src/App" -c Release -p:DomentSimulation=true
+  expect_rc 1
+  expect_count 'error DOMENT' 1
+  expect_count "$SIMULATION_ERROR" 1
+  dn publish "$root/src/App" -c Debug -p:DomentSimulation=true
+  expect_rc 0
+  dn msbuild "$root/src/App" -restore -t:Publish -p:Configuration=Release -p:DomentSimulation=true
+  expect_rc 1
+  expect_count "$SIMULATION_ERROR" 1
+  dn publish "$root/src/App" -c Release
+  expect_rc 0
+}
+
+CASES+=(simulation_reference_without_property)
+case_simulation_reference_without_property() {
+  local root=$FIXTURE_RUN/simulation_reference_without_property
+  fixture_project simulation_reference_without_property src/Doment.Simulation net10.0
+  fixture_project simulation_reference_without_property src/Mid net10.0 project=../Doment.Simulation/Doment.Simulation.csproj
+  simulation_app simulation_reference_without_property src/App2 \
+    $'>\n    <ProjectReference Include="../Mid/Mid.csproj" />'
+  dn publish "$root/src/App2" -c Release
+  expect_rc 1
+  expect_count "$SIMULATION_ERROR" 1
+}
+
 CASES+=(gate_repository)
 case_gate_repository() {
   OUT=$(DOMENT_GATE_NO_FETCH=1 timeout 1800 bash "$REPO_ROOT/build/gate.sh" 2>&1) && RC=0 || RC=$?

@@ -7,7 +7,15 @@
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(DomentSimulation)' == 'true'">
+    <DefineConstants>$(DefineConstants);DOMENT_SIMULATION</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../Doment.Host/Doment.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DomentSimulation)' == 'true'">
+    <ProjectReference Include="../Doment.Simulation/Doment.Simulation.csproj" />
   </ItemGroup>
 </Project>

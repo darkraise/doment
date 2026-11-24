@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <DomentSimulation Condition="'$(DomentSimulation)' == ''">false</DomentSimulation>
+  </PropertyGroup>
+
+  <!-- PrepareForPublish runs for dotnet publish and msbuild -t:Publish alike, after the build resolved ReferencePath. -->
+  <Target Name="DomentSimulationCheck"
+          BeforeTargets="PrepareForPublish"
+          Condition="'$(Configuration)' != 'Debug'">
+    <ItemGroup>
+      <_DomentSimulationReference Include="@(ReferencePath)" Condition="'%(Filename)' == 'Doment.Simulation'" />
+    </ItemGroup>
+    <Error Code="DOMENT030"
+           Text="a release publish cannot include Doment.Simulation; build simulation binaries in Debug"
+           Condition="'$(DomentSimulation)' == 'true' or '@(_DomentSimulationReference)' != ''" />
+  </Target>
+</Project>
