@@ -292,16 +292,16 @@ namespace Fx;
 public static class Probe
 {
     [DllImport("libc", EntryPoint = "getpid")]
-    public static extern int GetPid();
+    internal static extern int GetPid();
 }'
   fx "$d" LibImport '<AllowUnsafeBlocks>true</AllowUnsafeBlocks>' '' 'using System.Runtime.InteropServices;
 
 namespace Fx;
 
-public static partial class Probe
+internal static partial class Probe
 {
     [LibraryImport("libc", EntryPoint = "getpid")]
-    public static partial int GetPid();
+    internal static partial int GetPid();
 }'
   fx "$d" NativeLib '' '' 'using System.Runtime.InteropServices;
 
@@ -450,8 +450,8 @@ t_A13() {
   local d
   d=$(standin a13 outside)
   fx "$d" Fx '' '' "$CLEAN_SRC"
-  mkdir -p "$OUTSIDE/empty-packages"
-  ENVV=(DOMENT_QA=1 "DARKRAISE_FRAMEWORK_PATH=$FRAMEWORK" "NUGET_PACKAGES=$OUTSIDE/empty-packages")
+  sed -i 's/"version": "[0-9.]*"/"version": "99.0.0"/' "$d/.config/dotnet-tools.json"
+  ENVV=(DOMENT_QA=1 "DARKRAISE_FRAMEWORK_PATH=$FRAMEWORK")
   case_ "tool not restored"
   run "$d/src/Fx" 600 dotnet build -nologo -tl:off
   [[ $RC -ne 0 ]] || note "the build passed with the tool not restored"
@@ -470,7 +470,7 @@ t_A14() {
 namespace Fx;   public static class Probe
 {
     [DllImport("libc", EntryPoint = "getpid")]
-    public static extern int GetPid();
+    internal static extern int GetPid();
 }'
   case_ "own-file properties change nothing"
   run "$d/src/Own" 600 dotnet build -nologo -tl:off
@@ -540,11 +540,13 @@ t_A17() {
   ENVV=(DOMENT_QA=1 "DOTNET_ROOT=/usr/local/share/dotnet")
   run "$REPO_ROOT" 300 "$exe" --list-tests
   rc_is 0
-  has -i 'Version'
+  has '[Vv]ersion'
   run "$REPO_ROOT" 300 "$exe"
   rc_is 0
-  has 'Microsoft\.Testing\.Platform|xUnit\.net v3'
-  has 'failed: 0|0 failed'
+  ls "$(dirname "$exe")" | grep -q '^xunit.v3.*dll$' || note "no xunit.v3 assembly beside the test executable"
+  has 'failed: 0'
+  has 'succeeded: [1-9]'
+  run "$REPO_ROOT" 300 "$exe" --info
   local rt
   rt=$(grep -Eo '\.NET 10\.0\.[0-9]+|\.NET [0-9]+\.[0-9]+\.[0-9]+' <<<"$OUT" | head -n 1 | sed 's/^\.NET //')
   [[ -n $rt ]] && version_at_least "$rt" 10.0.14 || note "the test executable does not report a runtime of 10.0.14 or later (reported '$rt'): $(head -n 4 <<<"$OUT")"
@@ -707,6 +709,11 @@ t_A23() {
   run "$REPO_ROOT" 900 bash build/gate.sh "$d"
   [[ $RC -eq 0 ]] || note "the gate exited $RC; output: $(tail_out)"
   has ' 0 violations$'
+  case_ "path with ' and a space only"
+  mkrepo "$OUTSIDE/q' y" master || die_setup "mkrepo"
+  run "$REPO_ROOT" 900 bash build/gate.sh "$OUTSIDE/q' y"
+  rc_is 0
+  has ' 0 violations$'
   local c b
   for c in ';' '%' '$' '@' '"' ','; do
     case_ "path with $c"
@@ -715,7 +722,7 @@ t_A23() {
     git -C "$b" init -q
     run "$REPO_ROOT" 120 bash build/gate.sh "$b"
     rc_is 2
-    has "'${c//\\/\\\\}'"
+    grep -Fq -- "'$c'" <<<"$OUT" || note "the output does not name '$c': $(tail_out)"
     has 'MSBuild cannot take'
   done
 }
