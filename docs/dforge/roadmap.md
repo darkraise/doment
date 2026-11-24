@@ -6,7 +6,7 @@
 
 | M | Name | Exit criteria | Register | State | Note |
 |---|---|---|---|---|---|
-| M0 | Discovery | brief, users, non-goals and requirement list approved; competitor research recorded | docs/dforge/registers/2026-11-24-m0-discovery.md | open | - |
+| M0 | Discovery | brief, users, non-goals and requirement list approved; competitor research recorded | docs/dforge/registers/2026-11-24-m0-discovery.md | closed | audit 2026-11-24 8f73571: 9 MET, 0 deferred |
 | M1 | Foundations | architecture and build order recorded; the portable core, server, Linux agent and command-line client publish with NativeAOT on Linux; a pushed branch builds and tests on CI; gates.md declared; the walking skeleton connects two Linux processes and the measurement harness reports its latency | docs/dforge/registers/2026-11-24-m1-foundations.md | open | - |
 | M2 | Secure sessions and media transport | every M2 epic resolved; a synthetic stream with the frame sizes and timing of 1440p at 120 Hz crosses the test bench within the transport share of the latency budget at 0%, 1% and 5% loss; pairing, revocation and policy tests pass; gates green | docs/dforge/registers/2026-11-24-m2-sessions-transport.md | open | - |
 | M3 | Internet connectivity and self-hosted server | every M3 epic resolved; on the test bench two devices reach each other through the server on a direct path in every NAT case where one is possible and through the relay otherwise, with the active path reported; WAN adaptation profiles pass; gates green | docs/dforge/registers/2026-11-24-m3-connectivity.md | open | - |
