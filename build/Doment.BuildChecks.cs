@@ -344,6 +344,61 @@ public class DomentReferenceCheck : Task
 }
 
 // The parts of obj/project.assets.json the third-party check reads.
+// Run by build/gate.sh through build/Gate.proj: the tool manifest and the tracked binaries.
+public class DomentGateFiles : Task
+{
+    [Required]
+    public string Tree { get; set; }
+
+    [Required]
+    public string RegisterFile { get; set; }
+
+    // Relative to Tree; empty when the tree tracks no tool manifest.
+    public string ToolManifest { get; set; }
+
+    // A file of NUL-separated paths relative to Tree.
+    public string BinaryList { get; set; }
+
+    public override bool Execute()
+    {
+        DomentRegister register = DomentRegister.Load(RegisterFile);
+        foreach (string problem in register.Problems)
+        {
+            Log.LogError(null, "DOMENT013", null, null, 0, 0, 0, 0, "{0}: {1}", RegisterFile, problem);
+        }
+
+        if (!string.IsNullOrEmpty(ToolManifest))
+        {
+            var manifest = DomentJson.Parse(File.ReadAllText(Path.Combine(Tree, ToolManifest))) as DomentJson.Obj;
+            var tools = manifest == null ? null : manifest.Get("tools") as DomentJson.Obj;
+            if (tools != null)
+            {
+                foreach (KeyValuePair<string, object> tool in tools.Members)
+                {
+                    if (!register.Tools.Exists(row => row.Matches(tool.Key)))
+                    {
+                        Log.LogError(null, "DOMENT021", null, null, 0, 0, 0, 0,
+                            "{0}: tool {1} is not a build-and-test-only row of {2}", ToolManifest, tool.Key, RegisterFile);
+                    }
+                }
+            }
+        }
+
+        if (!string.IsNullOrEmpty(BinaryList) && File.Exists(BinaryList))
+        {
+            foreach (string file in File.ReadAllText(BinaryList).Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!register.Exceptions.Exists(row => row.Matches(file)) && !register.Tools.Exists(row => row.Matches(file)))
+                {
+                    Log.LogError(null, "DOMENT022", null, null, 0, 0, 0, 0,
+                        "{0} is a tracked binary that no row of {1} lists", file, RegisterFile);
+                }
+            }
+        }
+        return !Log.HasLoggedErrors;
+    }
+}
+
 public sealed class DomentAssets
 {
     // Package ID to version, in the order of the assets file's libraries.

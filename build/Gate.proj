@@ -1,0 +1,17 @@
+<Project>
+  <!-- Built by build/gate.sh: checks the tree's tool manifest and tracked binaries against the register. -->
+  <UsingTask TaskName="DomentGateFiles"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)Doment.BuildChecks.cs" />
+    </Task>
+  </UsingTask>
+
+  <Target Name="DomentGateFiles">
+    <DomentGateFiles Tree="$(DomentGateTree)"
+                     RegisterFile="$(DomentGateRegister)"
+                     ToolManifest="$(DomentGateToolManifest)"
+                     BinaryList="$(DomentGateBinaryList)" />
+  </Target>
+</Project>

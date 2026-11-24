@@ -939,6 +939,202 @@ case_framework_refs() {
   expect_count "error DOMENT012: $root/src/WinApp/WinApp.csproj: project reference $fw/src/Darkraise.Api/Darkraise.Api.csproj is not an allowed darkraise-framework project$" 1
 }
 
+expect_last() {
+  local last
+  last=$(tail -n 1 <<<"$OUT")
+  [[ $last == "$1" ]] || fail "expected the last line '$1', got '$last'; output: $(tail -n 20 <<<"$OUT")"
+}
+
+# A gate tree: a stand-in doment repository synced to a stand-in framework, without src/App, with
+# the real register plus row B9 (Fx.Tool), and a nuget.config that restores only from the run feed
+# into the run's packages folder.
+gate_setup() {
+  pack_fixture_packages
+  synced_setup
+  git rm -rq src/App
+  cp "$REPO_ROOT/docs/third-party-exceptions.md" docs/third-party-exceptions.md
+  # The backticks are Markdown, not command substitution.
+  # shellcheck disable=SC2016
+  sed -i '/^| B3 |/a | B9 | Fx tool | `Fx.Tool` | Tests | MIT | 2026-11-24 |' docs/third-party-exceptions.md
+  write_file nuget.config <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <config>
+    <add key="globalPackagesFolder" value="$TROOT/pkgs" />
+  </config>
+  <packageSources>
+    <clear />
+    <add key="run-feed" value="$FEED" />
+  </packageSources>
+</configuration>
+XML
+  git add -A
+  git commit -qm "Gate tree"
+  REG=$T/doment/docs/third-party-exceptions.md
+}
+
+# gate_project <project file> [<package id>...]: a net10.0 library in the gate tree, added to the index.
+gate_project() {
+  local file=$1 id items=
+  shift
+  for id in "$@"; do
+    items+="    <PackageReference Include=\"$id\" Version=\"1.0.0\" />"$'\n'
+  done
+  write_file "$file" <<XML
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+$items  </ItemGroup>
+</Project>
+XML
+  git add "$file"
+}
+
+run_gate() {
+  OUT=$(timeout 1800 bash "$T/doment/build/gate.sh" "$T/doment" 2>&1) && RC=0 || RC=$?
+}
+
+CASES+=(gate_reports_all)
+case_gate_reports_all() {
+  gate_setup
+  gate_project src/A/A.csproj Fx.Unlisted
+  gate_project src/B/B.csproj Fx.Tool
+  gate_project src/C/C.csproj
+  gate_project src/D/D.csproj Fx.Unlisted
+  git rm -q --cached src/D/D.csproj
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT010: $T/doment/src/A/A.csproj: package Fx.Unlisted 1.0.0 is in no table of $REG \(direct reference\)$" 1
+  expect_count "^error DOMENT011: $T/doment/src/B/B.csproj ships but resolves build-and-test-only package Fx.Tool 1.0.0, row B9 of $REG \(direct reference\)$" 1
+  expect_count 'error DOMENT' 2
+  expect_no_out 'src/D'
+  expect_last 'gate: 3 projects checked, 2 packages seen, 2 violations'
+}
+
+CASES+=(gate_unlisted_project)
+case_gate_unlisted_project() {
+  gate_setup
+  gate_project extra/E/E.csproj Fx.Unlisted
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT010: $T/doment/extra/E/E.csproj: package Fx.Unlisted 1.0.0 is in no table of $REG" 1
+}
+
+CASES+=(gate_not_importing)
+case_gate_not_importing() {
+  gate_setup
+  gate_project src/F/F.csproj
+  echo '<Project />' > src/F/Directory.Build.props
+  echo '<Project />' > src/F/Directory.Build.targets
+  git add src/F
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT020: $T/doment/src/F/F.csproj does not import the root Directory.Build.targets$" 1
+  expect_last 'gate: 1 projects checked, 0 packages seen, 1 violations'
+}
+
+CASES+=(gate_tool_manifest)
+case_gate_tool_manifest() {
+  gate_setup
+  write_file .config/dotnet-tools.json <<'JSON'
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "csharpier": { "version": "1.0.0", "commands": ["csharpier"], "rollForward": false },
+    "dotnet-ef": { "version": "10.0.0", "commands": ["dotnet-ef"], "rollForward": false }
+  }
+}
+JSON
+  git add .config
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT021: \.config/dotnet-tools\.json: tool dotnet-ef is not a build-and-test-only row of $REG$" 1
+  expect_count 'DOMENT021' 1
+  expect_no_out 'csharpier'
+}
+
+CASES+=(gate_binary)
+case_gate_binary() {
+  gate_setup
+  mkdir -p lib assets
+  printf '\177ELF' > lib/native.so
+  printf 'MZ' > assets/x.dll
+  git add lib assets
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT022: lib/native\.so is a tracked binary that no row of $REG lists$" 1
+  expect_count "^error DOMENT022: assets/x\.dll is a tracked binary that no row of $REG lists$" 1
+  # shellcheck disable=SC2016
+  sed -i '/^| X2 |/a | X7 | Native fixture | `lib/native.so` | Tests | Fixture | MIT | `INative` | None | 2026-11-24 |' docs/third-party-exceptions.md
+  git add docs
+  run_gate
+  expect_rc 1
+  expect_count 'DOMENT022' 1
+  expect_count '^error DOMENT022: assets/x\.dll is a tracked binary' 1
+}
+
+CASES+=(gate_main_pin)
+case_gate_main_pin() {
+  gate_setup
+  gate_project src/C/C.csproj
+  git commit -qm "Add C"
+  local c2
+  git -C "$WT" switch -q -c feature
+  c2=$(framework_commit "$WT" feature.txt)
+  echo "$c2" > build/darkraise-framework.pin
+  fw_sh sync
+  expect_rc 0
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT005: pin $c2 is not an ancestor of the framework's origin/master$" 1
+  expect_count 'error DOMENT' 1
+  git switch -q -c topic
+  run_gate
+  expect_rc 0
+  expect_no_out 'DOMENT005'
+  expect_last 'gate: 1 projects checked, 0 packages seen, 0 violations'
+}
+
+CASES+=(gate_off_pin)
+case_gate_off_pin() {
+  gate_setup
+  gate_project src/C/C.csproj
+  git -C "$WT" switch -q -c other
+  local c2
+  c2=$(framework_commit "$WT" other.txt)
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT001: darkraise-framework at $WT is at $c2, but the pin is $C1$" 1
+  git -C "$WT" switch -q --detach "$C1"
+  echo untracked > "$WT/untracked.txt"
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT001: darkraise-framework at $WT is at the pin $C1 but not clean, first: untracked.txt$" 1
+}
+
+CASES+=(gate_skips_fixtures)
+case_gate_skips_fixtures() {
+  gate_setup
+  gate_project tests/build/fixtures/x/src/Bad/Bad.csproj Fx.Unlisted
+  run_gate
+  expect_rc 0
+  expect_last 'gate: 0 projects checked, 0 packages seen, 0 violations'
+  gate_project tests/build/other/Bad.csproj Fx.Unlisted
+  run_gate
+  expect_rc 1
+  expect_count "^error DOMENT010: $T/doment/tests/build/other/Bad.csproj: package Fx.Unlisted 1.0.0" 1
+}
+
+CASES+=(gate_repository)
+case_gate_repository() {
+  OUT=$(DOMENT_GATE_NO_FETCH=1 timeout 1800 bash "$REPO_ROOT/build/gate.sh" 2>&1) && RC=0 || RC=$?
+  expect_rc 0
+  expect_out '^gate: [0-9]+ projects checked, [0-9]+ packages seen, 0 violations$'
+}
+
 # ---------------------------------------------------------------------------
 # Runner
 
