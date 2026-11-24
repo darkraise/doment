@@ -258,14 +258,117 @@ t_A16() {
   rm -rf "$REPO_ROOT/artifacts/acceptance/a16"
 }
 
+CHECK=$REPO_ROOT/build/check.sh
+
+check_sh() { # check_sh <args...>; ENVV holds NAME=value pairs for this call
+  OUT=$(cd "$REPO_ROOT" && env "${ENVV[@]}" timeout 3000 bash "$CHECK" "$@" 2>&1) && RC=0 || RC=$?
+}
+
 t_A17() {
-  case_ "dotnet test"
-  [[ -f $REPO_ROOT/doment.slnx ]] || { note "no doment.slnx at the repository root"; return 0; }
-  # The testing platform's handshake fails with -tl:off or -clp:NoSummary (probe P6), so DN_FLAGS is not used.
-  OUT=$(cd "$REPO_ROOT" && timeout 600 dotnet test --solution doment.slnx -c Release -nologo 2>&1) && RC=0 || RC=$?
+  case_ "check.sh test"
+  [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
+  check_sh test
   rc_is 0
-  has '^ *succeeded: 5$'
-  has '^ *failed: 0$'
+  local first root
+  first=$(head -n 1 <<<"$OUT")
+  grep -Eq '^check: dotnet 10\.0\.4[0-9]{2} at /' <<<"$first" || note "first line is not 'check: dotnet 10.0.4nn at <dir>': $first"
+  root=${first#* at }
+  has '^check: test ok$'
+  eq "$(tail -n 1 <<<"$OUT")" "check: 1 steps run, 0 failed" "last line"
+
+  case_ "test host runtime"
+  local probe=$T/probe
+  mkdir -p "$probe"
+  printf '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n' \
+    > "$probe/Probe.csproj"
+  printf 'System.Console.WriteLine(System.Environment.Version);\n' > "$probe/Program.cs"
+  build "$probe" Probe.csproj -o "$probe/out"
+  rc_is 0
+  local v
+  v=$(DOTNET_ROOT=$root timeout 60 "$probe/out/Probe" 2>&1) || note "the probe apphost failed under DOTNET_ROOT=$root: $v"
+  check "the probe ran on runtime $v under DOTNET_ROOT=$root, below 10.0.14" version_at_least "$v" 10.0.14
+}
+
+t_A18() {
+  [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
+  case_ "build and test"
+  check_sh build test
+  rc_is 0
+  eq "$(grep -E '^check: (build|test) |^check: [0-9]+ steps' <<<"$OUT" | paste -sd '|')" \
+    "check: build ok|check: test ok|check: 2 steps run, 0 failed" "step lines"
+
+  case_ "failed build"
+  # Not /nonexistent: some hosts create it as a home directory.
+  ENVV=("DARKRAISE_FRAMEWORK_PATH=$T/no-framework")
+  check_sh
+  ENVV=()
+  rc_is 1
+  has '^check: build failed$'
+  has '^    .*DOMENT003'
+  hasnt '^check: portable'
+  eq "$(tail -n 1 <<<"$OUT")" "check: 1 steps run, 1 failed" "last line"
+
+  case_ "unknown step"
+  check_sh bogus
+  rc_is 2
+  has "^check: unknown step 'bogus'; steps: build, portable, aot, test$"
+}
+
+# Processes started by a check.sh run carry A19_MARK in their environment, so processes of other sessions on the
+# machine do not count.
+A19_NAMES='(^|/)(dotnet|MSBuild|VBCSCompiler|ilc|Doment\.Core\.Tests)(\.dll)?$'
+a19_leftovers() { # prints "<pid> <command>" for each marked process of those names
+  local pid exe
+  for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+    [[ $pid -eq $$ || $pid -eq $BASHPID ]] && continue
+    grep -qz "^A19_MARK=$A19_MARK\$" "/proc/$pid/environ" 2>/dev/null || continue
+    exe=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+    local word
+    for word in $(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -n 2); do
+      if grep -Eq "$A19_NAMES" <<<"$word"; then
+        echo "$pid $exe"
+        break
+      fi
+    done
+  done
+}
+a19_none_left() { # a19_none_left <when>
+  local i left
+  for i in $(seq 1 20); do
+    left=$(a19_leftovers)
+    [[ -z $left ]] && return 0
+    sleep 0.5
+  done
+  note "processes left after $1: $(head -n 5 <<<"$left" | cut -c1-200)"
+}
+
+t_A19() {
+  [[ -f $CHECK ]] || { note "no build/check.sh"; return 0; }
+  A19_MARK=$$-$RANDOM
+  case_ "after build and test"
+  ENVV=("A19_MARK=$A19_MARK")
+  check_sh build test
+  rc_is 0
+  a19_none_left "build/check.sh build test"
+
+  case_ "after a timeout"
+  ENVV=("A19_MARK=$A19_MARK" DOMENT_CHECK_TIMEOUT=1)
+  check_sh build
+  rc_is 1
+  has '^    timed out after 1 s: '
+  a19_none_left "a timed-out build"
+
+  case_ "after SIGTERM"
+  (cd "$REPO_ROOT" && exec env "A19_MARK=$A19_MARK" timeout 900 bash "$CHECK" build > "$T/a19.out" 2>&1) &
+  local pid=$!
+  sleep 2
+  kill -TERM "$pid"
+  wait "$pid"
+  RC=$?
+  OUT=$(cat "$T/a19.out")
+  rc_fails
+  a19_none_left "SIGTERM two seconds into build/check.sh build"
+  ENVV=()
 }
 
 t_A20() {
@@ -386,7 +489,9 @@ TESTS=(
   "A10: the root .editorconfig is the framework's with only the recorded doment changes|t_A10"
   "A15: DomentSimulation=true gives Doment.Cli and Doment.Agent the simulation reference and constant|t_A15"
   "A16: a release publish with simulation fails with DOMENT030; a debug publish succeeds|t_A16"
-  "A17: dotnet test runs the solution's five tests on the testing platform|t_A17"
+  "A17: build/check.sh test passes and its DOTNET_ROOT runs apphosts on runtime 10.0.14 or later|t_A17"
+  "A18: build/check.sh runs the named steps in order, stops at the first failure and refuses an unknown step|t_A18"
+  "A19: build/check.sh leaves no build or test process behind, after success, a timeout or SIGTERM|t_A19"
   "A20: the gate passes on this tree and every platform row is added by the .NET SDK|t_A20"
   "A21: every tracked text file is LF in the index and attributes force LF; binaries are not text|t_A21"
   "A28: each solution project's DomentPlatform matches its module map Kind and only Doment.Agent is linux|t_A28"
