@@ -1,1 +1,5 @@
 .dforge/
+/external/darkraise-framework/
+bin/
+obj/
+/tests/build/fixtures/.run/

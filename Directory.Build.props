@@ -1,0 +1,28 @@
+<Project>
+  <PropertyGroup>
+    <DomentRepoRoot Condition="'$(DomentRepoRoot)' == ''">$(MSBuildThisFileDirectory)</DomentRepoRoot>
+    <DomentRepoRoot>$([MSBuild]::EnsureTrailingSlash('$(DomentRepoRoot)'))</DomentRepoRoot>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DomentFrameworkPathSource Condition="'$(DarkraiseFrameworkPath)' != ''">property</DomentFrameworkPathSource>
+    <DomentFrameworkPathValue Condition="'$(DarkraiseFrameworkPath)' != ''">$(DarkraiseFrameworkPath)</DomentFrameworkPathValue>
+    <DomentFrameworkPathSource Condition="'$(DomentFrameworkPathSource)' == '' and '$(DARKRAISE_FRAMEWORK_PATH)' != ''">environment</DomentFrameworkPathSource>
+    <DomentFrameworkPathValue Condition="'$(DomentFrameworkPathSource)' == 'environment'">$(DARKRAISE_FRAMEWORK_PATH)</DomentFrameworkPathValue>
+    <DomentFrameworkPathSource Condition="'$(DomentFrameworkPathSource)' == ''">default</DomentFrameworkPathSource>
+    <DomentFrameworkPathValue Condition="'$(DomentFrameworkPathSource)' == 'default'">$(DomentRepoRoot)external/darkraise-framework</DomentFrameworkPathValue>
+    <!-- A global -p:DarkraiseFrameworkPath cannot be overwritten here, so code that needs the trailing slash uses DomentFrameworkDir. -->
+    <DarkraiseFrameworkPath>$([MSBuild]::EnsureTrailingSlash('$(DomentFrameworkPathValue)'))</DarkraiseFrameworkPath>
+    <DomentFrameworkDir>$([MSBuild]::EnsureTrailingSlash('$(DomentFrameworkPathValue)'))</DomentFrameworkDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DomentFrameworkPinFile Condition="'$(DomentFrameworkPinFile)' == ''">$(DomentRepoRoot)build/darkraise-framework.pin</DomentFrameworkPinFile>
+    <FrameworkPinStrict Condition="'$(FrameworkPinStrict)' == ''">false</FrameworkPinStrict>
+    <DomentRegisterFile Condition="'$(DomentRegisterFile)' == ''">$(DomentRepoRoot)docs/third-party-exceptions.md</DomentRegisterFile>
+    <_DomentProjectRelativePath>$([MSBuild]::MakeRelative('$(DomentRepoRoot)', '$(MSBuildProjectFullPath)').Replace('\', '/'))</_DomentProjectRelativePath>
+    <DomentBuildOnly Condition="'$(DomentBuildOnly)' == '' and ($(_DomentProjectRelativePath.StartsWith('tests/')) or $(_DomentProjectRelativePath.StartsWith('tools/')))">true</DomentBuildOnly>
+    <DomentBuildOnly Condition="'$(DomentBuildOnly)' == ''">false</DomentBuildOnly>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);DOMENT001;DOMENT002</WarningsNotAsErrors>
+  </PropertyGroup>
+</Project>

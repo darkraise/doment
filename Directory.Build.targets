@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <DomentRootTargetsImported>true</DomentRootTargetsImported>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)build/Doment.Framework.targets" />
+</Project>

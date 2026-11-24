@@ -1,0 +1,35 @@
+<Project>
+  <!--
+    Imported by the root Directory.Build.targets, and also built as a project of its own by
+    the MSBuild call below: MSBuild caches that call's result once per build, so every
+    project in a build shares one check and one diagnostic.
+  -->
+  <PropertyGroup>
+    <_DomentFrameworkCheckProperties>DomentCheckPath=$(DomentFrameworkDir);DomentCheckPathSource=$(DomentFrameworkPathSource);DomentCheckPathValue=$(DomentFrameworkPathValue);DomentCheckPinFile=$(DomentFrameworkPinFile);DomentCheckStrict=$(FrameworkPinStrict)</_DomentFrameworkCheckProperties>
+    <_DomentFrameworkCheckRemoved>TargetFramework;RuntimeIdentifier;SelfContained;Configuration;Platform;SolutionDir</_DomentFrameworkCheckRemoved>
+  </PropertyGroup>
+
+  <Target Name="DomentPresenceCheck"
+          BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences"
+          Condition="'$(DomentCheckPathSource)' == ''">
+    <MSBuild Projects="$(MSBuildThisFileFullPath)"
+             Targets="_DomentPresenceCheck"
+             Properties="$(_DomentFrameworkCheckProperties)"
+             RemoveProperties="$(_DomentFrameworkCheckRemoved)" />
+  </Target>
+
+  <Target Name="_DomentPresenceCheck">
+    <PropertyGroup>
+      <_DomentCheckPathName Condition="'$(DomentCheckPathSource)' == 'property'">DarkraiseFrameworkPath</_DomentCheckPathName>
+      <_DomentCheckPathName Condition="'$(DomentCheckPathSource)' == 'environment'">DARKRAISE_FRAMEWORK_PATH</_DomentCheckPathName>
+      <_DomentCheckPathName Condition="'$(_DomentCheckPathName)' == ''">$(DomentCheckPathSource)</_DomentCheckPathName>
+      <_DomentCheckShownPath>$(DomentCheckPath.TrimEnd('/').TrimEnd('\'))</_DomentCheckShownPath>
+    </PropertyGroup>
+    <Error Code="DOMENT004"
+           Condition="!$([System.IO.Path]::IsPathRooted('$(DomentCheckPathValue)'))"
+           Text="$(_DomentCheckPathName) must be an absolute path, got '$(DomentCheckPathValue)'" />
+    <Error Code="DOMENT003"
+           Condition="!Exists('$(DomentCheckPath)')"
+           Text="darkraise-framework not found at $(_DomentCheckShownPath); run tools/framework.sh sync" />
+  </Target>
+</Project>
