@@ -39,7 +39,7 @@ fail() {
 }
 
 # `dotnet build` appends -consoleloggerparameters:Summary after the caller's -clp:NoSummary
-# (SDK 10.0.302), so the console logger is replaced by one that is told NoSummary itself.
+# (SDK 10.0.302 and 10.0.404), so the console logger is replaced by one that is told NoSummary itself.
 DN_LOGGER=(-noConsoleLogger "-logger:ConsoleLogger,Microsoft.Build;NoSummary;Verbosity=minimal")
 
 dn() {

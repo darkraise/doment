@@ -10,7 +10,7 @@ export UseSharedCompilation=false
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 
 # `dotnet build` appends -consoleloggerparameters:Summary after the caller's -clp:NoSummary
-# (SDK 10.0.302), so the console logger is replaced by one that is told NoSummary itself.
+# (SDK 10.0.302 and 10.0.404), so the console logger is replaced by one that is told NoSummary itself.
 DN_FLAGS=(-nologo -tl:off -clp:NoSummary -noConsoleLogger "-logger:ConsoleLogger,Microsoft.Build;NoSummary;Verbosity=minimal")
 
 if [[ $# -gt 1 ]]; then
