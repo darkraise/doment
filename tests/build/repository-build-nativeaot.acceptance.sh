@@ -755,6 +755,14 @@ t_A23() {
     grep -Fq -- "'$c'" <<<"$OUT" || note "the output does not name '$c': $(tail_out)"
     has 'MSBuild cannot take'
   done
+  for c in ';' '%' '$' '@' '"' ',' '&' '<'; do
+    case_ "framework path with $c"
+    ENVV=(DOMENT_QA=1 "DARKRAISE_FRAMEWORK_PATH=$OUTSIDE/fw${c}x")
+    run "$REPO_ROOT" 120 bash build/gate.sh
+    rc_is 2
+    grep -Fq -- "'$c'" <<<"$OUT" || note "the output does not name '$c': $(tail_out)"
+    has 'DARKRAISE_FRAMEWORK_PATH .*MSBuild cannot take'
+  done
 }
 
 t_A24() {

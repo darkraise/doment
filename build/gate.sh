@@ -24,12 +24,17 @@ TREE=$(git -C "$TREE_ARG" rev-parse --show-toplevel 2>/dev/null) || {
 }
 # MSBuild gives these characters a meaning of its own in paths; `&` and `<` also break the inline
 # tasks, whose RoslynCodeTaskFactory body is re-parsed as XML after the path is expanded into it.
-for c in ';' '%' '$' '@' '"' ',' '&' '<'; do
-  if [[ $TREE == *"$c"* ]]; then
-    echo "gate: $TREE contains '$c', which MSBuild cannot take in a path" >&2
-    exit 2
-  fi
-done
+refuse_msbuild_path() { # refuse_msbuild_path <label> <path>
+  local c
+  for c in ';' '%' '$' '@' '"' ',' '&' '<'; do
+    if [[ $2 == *"$c"* ]]; then
+      echo "gate: $1$2 contains '$c', which MSBuild cannot take in a path" >&2
+      exit 2
+    fi
+  done
+}
+refuse_msbuild_path '' "$TREE"
+[[ -z ${DARKRAISE_FRAMEWORK_PATH:-} ]] || refuse_msbuild_path 'DARKRAISE_FRAMEWORK_PATH ' "$DARKRAISE_FRAMEWORK_PATH"
 # The tree's global.json, if any, selects the SDK.
 cd "$TREE"
 REGISTER=$TREE/docs/third-party-exceptions.md
