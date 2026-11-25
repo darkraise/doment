@@ -25,4 +25,4 @@
 | 18 | CA1401 rejects a public P/Invoke under the root settings, so native fixture classes are internal | - | - | deferred | Task 10 discovery; handled in the fixtures |
 | 19 | /nonexistent exists on this host, so a framework path there gives DOMENT002 instead of DOMENT003 | - | - | deferred | Task 11 discovery; A18 uses a path under the test directory |
 | 20 | Download-dependency versions in project.assets.json are exact ranges such as [10.0.15, 10.0.15] | - | - | deferred | Task 12 discovery; handled by the portable and aot steps |
-| 21 | A20's platform-packages case diffs against merge-base HEAD master, so on master (after the merge) it finds no row and fails | - | - | open | found 2026-11-25; fails on any run from master, including CI |
+| 21 | A20's platform-packages case diffs against merge-base HEAD master, so on master (after the merge) it finds no row and fails | docs/dforge/specs/2026-11-25-ci-pushed-branches-design.md | A13 | open | found 2026-11-25; fails on any run from master, including CI |
