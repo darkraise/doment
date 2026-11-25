@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, doment-linux]
+    timeout-minutes: 10
+    steps:
+      - name: Probe the runner
+        run: |
+          echo "host: $(hostname)"
+          echo "runner: $RUNNER_NAME"
+          echo "user: $(whoami)"
+          echo "home: $HOME"
+          for dir in "$HOME/.ssh" "$HOME/.nuget/packages"; do
+            if [ -d "$dir" ]; then
+              echo "$dir: exists, $(ls -A "$dir" | wc -l) entries"
+            else
+              echo "$dir: absent"
+            fi
+          done
+          echo "cgroup: $(cat /proc/self/cgroup)"
+          echo "hook: ${ACTIONS_RUNNER_HOOK_JOB_STARTED:-}"
+          command -v clang || echo "missing: clang"
+          command -v jq || echo "missing: jq"
+          command -v file || echo "missing: file"
+          command -v ps || echo "missing: ps"
+          command -v pgrep || echo "missing: pgrep"
+          command -v ssh || echo "missing: ssh"
+          df -Pk "$GITHUB_WORKSPACE" || echo "df failed"
+          hook="${ACTIONS_RUNNER_HOOK_JOB_STARTED:-}"
+          if [ -z "$hook" ] || [ ! -r "$hook" ] || ! grep -q 'refusing a job started from another repository' "$hook"; then
+            echo "::error::ghr's fork refusal is not installed"
+            exit 1
+          fi
+          echo "fork refusal: installed at $hook"
