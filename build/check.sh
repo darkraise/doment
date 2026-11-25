@@ -76,12 +76,15 @@ kill_child() {
 
 finish() {
   kill_child
-  # Under the same bounds as a call, so the shutdown itself leaves nothing behind.
-  setsid timeout -k 10 120 dotnet build-server shutdown > /dev/null 2>&1 &
-  CHILD=$!
-  wait "$CHILD" 2>/dev/null
-  kill -KILL -- "-$CHILD" 2>/dev/null
-  CHILD=
+  # Every CI runner is the same user, so a shutdown there would stop other jobs' build servers.
+  if [[ ${GITHUB_ACTIONS:-} != true ]]; then
+    # Under the same bounds as a call, so the shutdown itself leaves nothing behind.
+    setsid timeout -k 10 120 dotnet build-server shutdown > /dev/null 2>&1 &
+    CHILD=$!
+    wait "$CHILD" 2>/dev/null
+    kill -KILL -- "-$CHILD" 2>/dev/null
+    CHILD=
+  fi
   rm -rf "$TMP"
 }
 trap finish EXIT

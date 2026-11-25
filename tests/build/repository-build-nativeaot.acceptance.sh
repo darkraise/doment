@@ -544,7 +544,7 @@ t_A17() {
   case_ "test executable"
   local exe=$REPO_ROOT/tests/Doment.Core.Tests/bin/Release/net10.0/Doment.Core.Tests
   [[ -x $exe ]] || { note "no test executable at $exe"; return 0; }
-  ENVV=(DOMENT_QA=1 "DOTNET_ROOT=/usr/local/share/dotnet")
+  ENVV=(DOMENT_QA=1 "DOTNET_ROOT=$(dirname "$(readlink -f "$(command -v dotnet)")")")
   run "$REPO_ROOT" 300 "$exe" --list-tests
   rc_is 0
   has '[Vv]ersion'
@@ -664,13 +664,15 @@ t_A19() {
 
 t_A20() {
   case_ "gate on the repository"
+  ENVV=(DOMENT_QA=1 DOMENT_GATE_NO_FETCH=1)
   run "$REPO_ROOT" 900 bash build/gate.sh
   rc_is 0
   has ' 0 violations$'
   case_ "platform-packages rows added by this epic"
-  local base rows row id n=0
-  base=$(git -C "$REPO_ROOT" merge-base HEAD master) || { note "no merge base with master"; return 0; }
-  rows=$(git -C "$REPO_ROOT" diff "$base" HEAD -- docs/third-party-exceptions.md | grep -E '^\+\| *`' || true)
+  # The epic's own commit range, fixed so the case does not depend on the branch it runs on; the rows it added are
+  # still checked against the current restore output below.
+  local base=35192a629bedf8b342ebd5e6cdce851d1c89754c end=13ad5350a066e58bf4be3443203a5a9d07708c3a rows row id n=0
+  rows=$(git -C "$REPO_ROOT" diff "$base" "$end" -- docs/third-party-exceptions.md | grep -E '^\+\| *`' || true)
   while IFS= read -r row; do
     [[ -n $row ]] || continue
     n=$((n + 1))
