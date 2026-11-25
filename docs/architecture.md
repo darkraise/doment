@@ -236,7 +236,8 @@ against. Its first value was the framework remote's master on 2026-11-24, `e3cb1
 
 The framework's standing rule is that commits stay local and the owner pushes. A doment feature branch may therefore
 pin a framework commit that exists only on this machine. CI, and the gate when it runs on doment's main branch,
-require the pin to be an ancestor of the framework's remote master (DOMENT005).
+require the pin to be an ancestor of the framework's remote master (DOMENT005). With `DOMENT_GATE_PIN_ON_MASTER=1`
+the gate applies that check on any branch or a detached HEAD.
 
 ### `tools/framework.sh`
 
@@ -278,7 +279,7 @@ They run once per build, whatever the number of projects:
 | DOMENT001 | The worktree is not at the pin, or not clean; names the actual and the pinned commit and the first offending path | Warning, so framework work in progress still builds; an error with `FrameworkPinStrict=true` |
 | DOMENT002 | The framework directory is not a git checkout, or git is not installed, so the commit cannot be verified | Warning; an error with `FrameworkPinStrict=true` |
 | DOMENT006 | The pin file does not hold one full 40-character commit hash | Error |
-| DOMENT005 | On doment's `master` or `main`, the pin is not an ancestor of the framework's `origin/master` | Gate error |
+| DOMENT005 | On doment's `master` or `main` (or any branch or a detached HEAD with `DOMENT_GATE_PIN_ON_MASTER=1`), the pin is not an ancestor of the framework's `origin/master` | Gate error |
 
 The gate command and CI build with `FrameworkPinStrict=true`, so a doment commit cannot pass its gates against a
 framework tree other than the pinned commit.
@@ -359,7 +360,7 @@ framework checks run once for the tree. The gate also fails on:
 | DOMENT020 | A tracked project file does not import the root `Directory.Build.targets` |
 | DOMENT021 | `.config/dotnet-tools.json` names a tool that is not a build-and-test-only row |
 | DOMENT022 | A tracked `.dll`, `.exe`, `.so`, `.dylib`, `.a`, `.lib`, `.sys`, `.nupkg` or `.snupkg` file is listed in no files cell of table 1 or 2 |
-| DOMENT005 | On `master` or `main`: the pin is not an ancestor of the framework's `origin/master` (fetched first, unless `DOMENT_GATE_NO_FETCH=1`) |
+| DOMENT005 | On `master` or `main`, or on any branch or a detached HEAD with `DOMENT_GATE_PIN_ON_MASTER=1`: the pin is not an ancestor of the framework's `origin/master` (fetched first, unless `DOMENT_GATE_NO_FETCH=1`) |
 
 It prints every violation once, not only the first, then one summary line:
 

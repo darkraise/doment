@@ -129,7 +129,7 @@ dn msbuild "$SCRIPT_DIR/Gate.proj" -t:DomentGateFiles "-p:DomentGateTree=$TREE" 
 collect "checking the tracked files"
 
 branch=$(git -C "$TREE" branch --show-current)
-if [[ $branch == master || $branch == main ]]; then
+if [[ $branch == master || $branch == main || ${DOMENT_GATE_PIN_ON_MASTER:-} == 1 ]]; then
   framework=${DARKRAISE_FRAMEWORK_PATH:-$TREE/external/darkraise-framework}
   framework=${framework%/}
   pin_file=$TREE/build/darkraise-framework.pin

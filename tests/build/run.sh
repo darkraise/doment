@@ -12,7 +12,7 @@ export UseSharedCompilation=false
 export DOTNET_NOLOGO=1
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
-unset DARKRAISE_FRAMEWORK_PATH DARKRAISE_FRAMEWORK_REPO
+unset DARKRAISE_FRAMEWORK_PATH DARKRAISE_FRAMEWORK_REPO DOMENT_GATE_PIN_ON_MASTER
 
 TROOT=$(mktemp -d "${TMPDIR:-/tmp}/doment-build-tests.XXXXXX")
 FIXTURE_RUN=$REPO_ROOT/tests/build/fixtures/.run
@@ -1362,6 +1362,18 @@ case_gate_main_pin() {
   expect_rc 0
   expect_no_out 'DOMENT005'
   expect_last 'gate: 1 projects checked, 0 packages seen, 0 violations'
+  DOMENT_GATE_PIN_ON_MASTER=1 run_gate
+  expect_rc 1
+  expect_count "^error DOMENT005: pin $c2 is not an ancestor of the framework's origin/master$" 1
+  expect_count 'error DOMENT' 1
+  git checkout -q --detach
+  DOMENT_GATE_PIN_ON_MASTER=1 run_gate
+  expect_rc 1
+  expect_count "^error DOMENT005: pin $c2 is not an ancestor of the framework's origin/master$" 1
+  expect_count 'error DOMENT' 1
+  DOMENT_GATE_PIN_ON_MASTER=0 run_gate
+  expect_rc 0
+  expect_no_out 'DOMENT005'
 }
 
 CASES+=(gate_off_pin)
