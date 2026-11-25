@@ -17,6 +17,15 @@
    **"ghr-managed apt (Recommended)"**.
 6. **Workflow shape.** Asked: one job with a two-entry matrix, two jobs with the setup duplicated (the do-less
    layout), or two jobs with a composite action. Answer: **"One job, 2-entry matrix (Recommended)"**.
+7. **GitHub-side changes and pushes (§3.6 items 2-4).** Asked at the spec review whether the session may create the
+   deploy key and secret, change the two repository settings, and push doment branches (the first push publishing the
+   54 unpushed master commits), the throwaway bad-pin branch, one same-repository pull request, and master at
+   finishing. Answer: **"Yes, all of it (Recommended)"** — consented 2026-11-25. §3.6 item 1 (the ghr host) stays the
+   owner's.
+
+Finish: merge
+
+Worktree: worktree
 
 ## 1. Goal and scope
 
