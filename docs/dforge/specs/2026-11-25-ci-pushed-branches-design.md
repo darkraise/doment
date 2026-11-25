@@ -74,22 +74,26 @@ The job's `if:` is
 `github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`. It skips
 a fork's pull request only while the fork leaves the workflow file alone: a `pull_request` run uses the workflow from
 the pull request's merge commit, so a fork can remove the condition or add a workflow of its own for
-`[self-hosted, doment-linux]`. Two controls outside the workflow keep fork code off the homelab host: ghr refuses
-every job whose event comes from a fork (§2), and the repository requires approval of every fork pull request run
-(§3.5 item 3). The `if:` remains so a well-behaved fork's run shows as skipped rather than refused.
+`[self-hosted, doment-linux]`. Two independent controls outside the workflow keep fork code off the homelab host:
+ghr's job-started hook refuses every `pull_request`, `pull_request_review`, `pull_request_review_comment`,
+`pull_request_target` and `workflow_run` job whose head repository is not the served one, killing the runner's worker
+before any step and failing closed on an unreadable payload (`ghr/hooks/job-started.sh`; it has no switch); and the
+repository requires approval of every fork pull request run (§3.6 item 3). The `if:` remains so a well-behaved fork's run shows as skipped rather than refused.
 
 A same-repository branch with an open pull request gets two runs per push (the push and the pull request's merge
 commit), four jobs in all. That is accepted: the pull request run checks the merged tree, the push run the branch. It
-is why the pool needs at least two concurrent runners (§3.5); queue time is measured on the first runs.
+is why the pool needs at least two concurrent runners (§3.6); queue time is measured on the first runs.
 
 ### 3.2 The job
 
 One job, `build`, with `strategy.matrix.suite: [check, acceptance]`, `fail-fast: false` and `name: ${{ matrix.suite }}`,
 so the two entries run as parallel jobs shown as `check` and `acceptance`. `runs-on: [self-hosted, doment-linux]`.
 Job environment: `MSBUILDDISABLENODEREUSE=1`, `DOTNET_CLI_USE_MSBUILD_SERVER=0`, `UseSharedCompilation=false`,
-`DOTNET_CLI_TELEMETRY_OPTOUT=1`, `TESTINGPLATFORM_TELEMETRY_OPTOUT=1`, `DOTNET_NOLOGO=1`, so no step leaves an MSBuild
-node or compiler server behind. A host-wide `dotnet build-server shutdown` is deliberately not run: every ghr runner
-is the same user, so it would stop other jobs' servers.
+`DOTNET_CLI_TELEMETRY_OPTOUT=1`, `TESTINGPLATFORM_TELEMETRY_OPTOUT=1`, `DOTNET_NOLOGO=1`, so no step starts an MSBuild
+node or compiler server, and ghr stops each runner's systemd unit with `KillMode=control-group`, so nothing outlives
+the job. No workflow step runs `dotnet build-server shutdown`: every ghr runner is the same user, so it would stop
+other jobs' servers, the framework's CI jobs included. For the same reason `build/check.sh`, which runs that shutdown
+on every exit (`build/check.sh:80`), skips it when `GITHUB_ACTIONS` is `true`; local runs keep it.
 
 Invariant: no step before the framework checkout runs a file from the checked-out tree. A tree script run there could
 write `GITHUB_ENV` or `GITHUB_PATH` and capture the key in the checkout step.
@@ -179,9 +183,11 @@ Each is a one-time step done by the owner, or by the session with the owner's co
 2. Deploy key: an ed25519 key pair generated into a temporary directory; the public half added to
    `darkraise-framework` as a read-only deploy key, the private half piped into
    `gh secret set DARKRAISE_FRAMEWORK_DEPLOY_KEY -R darkraise/doment` and then deleted, so it is kept nowhere else.
-3. Repository settings on `darkraise/doment`: fork pull request approval set to "Require approval for all external
-   contributors", the owner reading the workflow diff before approving any fork run; and "Require actions to be
-   pinned to a full-length commit SHA" turned on.
+3. Repository settings on `darkraise/doment`, done before item 1 makes ghr serve doment: fork pull request approval
+   set to "Require approval for all external contributors", and "Require actions to be pinned to a full-length commit
+   SHA" turned on. Approving a fork run executes nothing on ghr, which refuses it; what runs a fork's code on the host
+   is merging its pull request or pushing its branch into doment, so the owner reads the whole diff (build scripts,
+   project files and tests, not only the workflow) before doing either.
 4. Pushes, to the public repository: the first branch push also publishes the 54 commits of local master that are
    not on `origin/master`; pushes that add or change a workflow file need SSH or a token with the `workflow` scope.
    Verifying the epic takes a feature-branch push, one throwaway branch whose pin is a 40-character hash that is not
@@ -193,6 +199,8 @@ Each is a one-time step done by the owner, or by the session with the owner's co
 - Write access to doment implies read access to the private framework: anyone who can push a branch can change
   `ci.yml` to print the secret. `persist-credentials: false` keeps the key from build, restore and test code of a
   branch that leaves the workflow alone, not from the workflow itself. Today only the owner has write access.
+- doment has no merge queue and must not get one while ghr serves it: ghr does not refuse `merge_group` jobs, and a
+  merge queue runs a fork pull request's code as base-repository code.
 - During the framework checkout the key is in that step's process environment, which another job running on the ghr
   host as the same user can read (`ghr/docs/self-hosted-artifacts.md`, "One runner user"). That is inside ghr's trust
   domain: every repository it serves is the owner's.
@@ -219,7 +227,7 @@ A3. [test, high] Both jobs check out the framework at the commit in `build/darkr
 A4. [test, high] `build/ci.sh acceptance` runs `tests/build/repository-build.acceptance.sh`, `tests/build/repository-build-nativeaot.acceptance.sh` and `tests/build/ci-pushed-branches.acceptance.sh`, runs each even when an earlier one failed (shown locally with failing stand-in suites), and fails when any failed.
 A5. [test, neg, high] With `DOMENT_GATE_PIN_ON_MASTER=1`, the gate fails with DOMENT005 on a pin that is not an ancestor of the framework's `origin/master`, on a feature branch and on a detached HEAD; without it, on a branch other than master or main, the same pin does not fail the gate.
 A6. [test, high] The workflow passes `DOMENT_CI_PIN_ON_MASTER=1` exactly for a push to master and a pull request into master, and the `check` log prints `ci: gate DOMENT_GATE_PIN_ON_MASTER=<value>`.
-A7. [test, neg, high] No workflow declares `pull_request_target`, `workflow_run`, `issue_comment` or `merge_group`, and a pull request from a fork that leaves the workflow unchanged has its job skipped by the job condition.
+A7. [test, neg, high] Every workflow's `on:` declares only `push`, `pull_request` and `workflow_dispatch`, and a pull request from a fork that leaves the workflow unchanged has its job skipped by the job condition.
 A8. [test, neg, high] No job's `runs-on` names a GitHub-hosted label (`ubuntu-*`, `windows-*`, `macos-*`), and every `uses:` names an `actions/*` action at a full 40-character commit SHA.
 A9. [test, neg, high] The secret `DARKRAISE_FRAMEWORK_DEPLOY_KEY` is referenced by the framework checkout step only; after that step `build/ci.sh verify` finds no `core.sshCommand` and no private key under `RUNNER_TEMP` (and fails on a stand-in that has either); the workflow grants `contents: read` and nothing else.
 A10. [test, high] A pushed branch whose pin is not in the framework's remote fails at the framework checkout, with an error annotation naming the pin and saying to push the framework commit, check the secret or check outbound SSH.
@@ -236,6 +244,8 @@ A20. [test, high] A same-repository pull request into master starts `CI`, both e
 A21. [test, high] The deploy key on `darkraise-framework` reports `read_only: true` (`gh api repos/darkraise/darkraise-framework/keys`).
 A22. [test, high] `gh api repos/darkraise/doment/actions/permissions/fork-pr-contributor-approval` reports `all_external_contributors`, and `gh api repos/darkraise/doment/actions/permissions` reports `sha_pinning_required: true`.
 A23. [test, neg, high] No step before the framework checkout runs a file from the checked-out tree.
+A24. [test, high] The probe job prints `$ACTIONS_RUNNER_HOOK_JOB_STARTED` and fails unless that file holds ghr's fork refusal.
+A25. [test, neg, high] With `GITHUB_ACTIONS=true`, `build/check.sh` runs no `dotnet build-server shutdown`; without it, it still does.
 
 ## Riskiest assumption
 
@@ -244,7 +254,8 @@ Three parts, in the order the plan checks them:
 1. **The pool picks up the jobs.** The `doment-linux` pool is new owner setup, and the framework's own pool had run no
    job by 2026-11-25 (`darkraise-framework/docs/dforge/specs/2026-11-25-ci-on-ghr-design.md`). A job no runner serves
    stays queued with no log line. The plan's first pushed run is a probe job on `[self-hosted, doment-linux]` that
-   prints the host and runner name, `whoami`, `$HOME`, whether `~/.ssh` and `~/.nuget/packages` exist and are
+   prints the host and runner name, `$ACTIONS_RUNNER_HOOK_JOB_STARTED` (failing unless that file holds ghr's fork
+   refusal, A24), `whoami`, `$HOME`, whether `~/.ssh` and `~/.nuget/packages` exist and are
    non-empty, and the job's cgroup; still queued after 15 minutes, it is cancelled and the owner is asked.
 2. **The framework checkout is clean and LFS-free under strict mode.** Here the framework is a worktree made with LFS
    smudging off (`tools/framework.sh`); on the runner it is an `actions/checkout` clone, and a runner-user LFS filter
@@ -288,6 +299,15 @@ Fable, round 1 (2026-11-25): 1 Blocker, 2 High, 10 Medium, 6 Nit; 19 rulings, 1 
 - SDK install directory: always `$RUNNER_TEMP/dotnet` (§3.2 step 6).
 - Tools the suites need: `jq`, `file`, `procps`, `openssh-client` (§3.3, §3.6 item 1; `ssh` checked before the checkout).
 - Process cleanup: applied differently. A host-wide `dotnet build-server shutdown` would stop other jobs' servers, since every ghr runner is the same user; the job environment disables node reuse, the MSBuild server and the shared compiler instead, so the job starts none (§3.2).
+
+Fable, round 2 (2026-11-25): 0 Blocker and 0 High left open; 7 rulings, nothing undecided.
+
+- Fork pull requests: closed; ghr's hook refuses every fork-controlled event and has no switch, so no owner choice remains (§3.1).
+- ghr's refusal on the host (High): the probe checks the installed hook (A24); the approval setting is turned on before ghr serves doment (§3.6 item 3).
+- Merge boundary: §3.6 item 3 puts the owner's review at merging or pushing a fork's code; §3.7 forbids a merge queue.
+- Process cleanup: the false "deliberately not run" sentence replaced; the session also made `build/check.sh` skip its own shutdown on CI, since that shutdown would stop the framework jobs' servers on the shared runner user (§3.2, A25).
+- A7 is an allowlist of triggers.
+- §3.1 cross-references corrected to §3.6.
 - Step 4 is conditioned on the framework step's outcome and names blocked outbound SSH.
 - The clean check uses the build's definition (§3.3).
 - Action pinning: A8, plus the repository's SHA-pinning setting (§3.6 item 3, A22).
