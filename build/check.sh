@@ -12,6 +12,8 @@ export MSBUILDDISABLENODEREUSE=1
 export DOTNET_CLI_USE_MSBUILD_SERVER=0
 export UseSharedCompilation=false
 export DOTNET_NOLOGO=1
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export TESTINGPLATFORM_TELEMETRY_OPTOUT=1
 
 PROPS=(-c Release -p:FrameworkPinStrict=true -p:DomentFormatCheck=true -p:DomentAuditStrict=true)
 # `dotnet build` appends -consoleloggerparameters:Summary after the caller's -clp:NoSummary

@@ -6,6 +6,7 @@ set -euo pipefail
 export MSBUILDDISABLENODEREUSE=1
 export DOTNET_CLI_USE_MSBUILD_SERVER=0
 export UseSharedCompilation=false
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 
