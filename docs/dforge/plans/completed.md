@@ -1,1 +1,2 @@
 - 2026-11-24 `docs/dforge/plans/2026-11-24-architecture-decisions.md` — merged into `master` at 4a8b062
+- 2026-11-25 `docs/dforge/plans/2026-11-24-repository-build-nativeaot.md` — merged into `master` at 14d9667
