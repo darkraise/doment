@@ -3,40 +3,98 @@ name: CI
 on:
   push:
     branches: ['**']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.ref == 'refs/heads/master' && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+
 jobs:
-  probe:
+  build:
+    name: ${{ matrix.suite }}
+    # Shows a well-behaved fork's run as skipped; ghr's job-started hook and the approval setting are the controls.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [check, acceptance]
     runs-on: [self-hosted, doment-linux]
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.suite == 'check' && 60 || 180 }}
+    env:
+      MSBUILDDISABLENODEREUSE: 1
+      DOTNET_CLI_USE_MSBUILD_SERVER: 0
+      UseSharedCompilation: false
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      TESTINGPLATFORM_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    # No step before the framework checkout runs a file from the tree: it could write GITHUB_ENV and capture the key.
     steps:
-      - name: Probe the runner
+      - name: Check out doment
+        id: doment
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: Read the framework pin
+        id: pin
         run: |
-          echo "host: $(hostname)"
-          echo "runner: $RUNNER_NAME"
-          echo "user: $(whoami)"
-          echo "home: $HOME"
-          for dir in "$HOME/.ssh" "$HOME/.nuget/packages"; do
-            if [ -d "$dir" ]; then
-              echo "$dir: exists, $(ls -A "$dir" | wc -l) entries"
-            else
-              echo "$dir: absent"
-            fi
-          done
-          echo "cgroup: $(cat /proc/self/cgroup)"
-          echo "hook: ${ACTIONS_RUNNER_HOOK_JOB_STARTED:-}"
-          command -v clang || echo "missing: clang"
-          command -v jq || echo "missing: jq"
-          command -v file || echo "missing: file"
-          command -v ps || echo "missing: ps"
-          command -v pgrep || echo "missing: pgrep"
-          command -v ssh || echo "missing: ssh"
-          df -Pk "$GITHUB_WORKSPACE" || echo "df failed"
-          hook="${ACTIONS_RUNNER_HOOK_JOB_STARTED:-}"
-          if [ -z "$hook" ] || [ ! -r "$hook" ] || ! grep -q 'refusing a job started from another repository' "$hook"; then
-            echo "::error::ghr's fork refusal is not installed"
+          pin=$(<build/darkraise-framework.pin)
+          pin=${pin%$'\r'}
+          if [[ ! $pin =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::build/darkraise-framework.pin does not hold one 40-character commit hash"
             exit 1
           fi
-          echo "fork refusal: installed at $hook"
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
+          if ! command -v ssh > /dev/null 2>&1; then
+            echo "::error::openssh-client is missing on the runner; add it to the ghr pool's managed packages"
+            exit 1
+          fi
+
+      - name: Check out darkraise-framework
+        id: framework
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          GIT_LFS_SKIP_SMUDGE: 1
+        with:
+          repository: darkraise/darkraise-framework
+          ref: ${{ steps.pin.outputs.pin }}
+          path: external/darkraise-framework
+          ssh-key: ${{ secrets.DARKRAISE_FRAMEWORK_DEPLOY_KEY }}
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: false
+
+      - name: Explain the failed framework checkout
+        if: failure() && steps.framework.outcome == 'failure'
+        env:
+          PIN: ${{ steps.pin.outputs.pin }}
+        run: |
+          echo "::error::cannot check out darkraise-framework at $PIN: push that framework commit to its origin, check the DARKRAISE_FRAMEWORK_DEPLOY_KEY secret, or check that outbound SSH to github.com is open"
+
+      - name: Verify the runner and the checkouts
+        run: bash build/ci.sh verify
+
+      - name: Set up the .NET SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          global-json-file: global.json
+
+      - name: Show the SDK version
+        run: timeout 60 dotnet --version
+
+      - name: Restore the local tools
+        run: timeout 600 dotnet tool restore
+
+      - name: Run ${{ matrix.suite }}
+        env:
+          DOMENT_CI_PIN_ON_MASTER: ${{ matrix.suite == 'check' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.base_ref == 'master')) && '1' || '0' }}
+        run: bash build/ci.sh ${{ matrix.suite }}

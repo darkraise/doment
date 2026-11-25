@@ -251,6 +251,113 @@ t_usage() {
   done
 }
 
+# Static checks of the workflow files: text matches, no YAML parser. A step starts at a line indented six spaces
+# followed by `- `, as in .github/workflows/ci.yml.
+WORKFLOWS=("$REPO_ROOT"/.github/workflows/*.yml)
+C5_IF="github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository"
+C5_GROUP="ci-\${{ github.event_name }}-\${{ github.ref }}\${{ github.ref == 'refs/heads/master' && format('-{0}', github.run_id) || '' }}"
+C5_PIN="\${{ matrix.suite == 'check' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'pull_request' && github.base_ref == 'master')) && '1' || '0' }}"
+
+top_block() { # top_block <file> <key>: the lines under a top-level key, up to the next top-level line
+  awk -v k="$2:" '$0 == k { f = 1; next } /^[^ #]/ { f = 0 } f && NF' "$1"
+}
+sub_block() { # sub_block <key>: from stdin, the lines under a two-space-indented key
+  awk -v k="  $1:" '$0 == k { f = 1; next } /^  [^ ]/ { f = 0 } f && NF'
+}
+steps() { # steps <file>: every step's lines, each step ended by a line `%%`
+  awk '/^      - / { if (n) print "%%"; n = 1 } /^[^ ]|^  [^ ]|^    [^ -]/ { if (n) print "%%"; n = 0 } n { print }
+    END { if (n) print "%%" }' "$1"
+}
+step_with() { # step_with <file> <line regex>: the steps holding a line that matches, each ended by `%%`
+  steps "$1" | awk -v re="$2" '$0 == "%%" { if (m) printf "%s%%%%\n", b; b = ""; m = 0; next } { b = b $0 "\n"; if ($0 ~ re) m = 1 }'
+}
+value_of() { sed -nE "s/^ *(- )?$1: //p" <<<"$2"; } # value_of <key> <text>: the values of that key
+
+t_A7() {
+  local f keys
+  for f in "${WORKFLOWS[@]}"; do
+    case_ "triggers of ${f##*/}"
+    OUT=$(top_block "$f" on)
+    keys=$(sed -nE 's/^  ([a-z_]+):.*/\1/p' <<<"$OUT" | sort | tr '\n' ' ')
+    eq "$keys" "pull_request push workflow_dispatch " "on: keys"
+    eq "$(sub_block push <<<"$OUT")" "    branches: ['**']" "push block"
+    eq "$(sub_block pull_request <<<"$OUT")" "    branches: [master]" "pull_request block"
+    case_ "job condition of ${f##*/}"
+    eq "$(sed -nE 's/^    if: //p' "$f")" "$C5_IF" "job if"
+  done
+}
+
+t_A8() {
+  local f
+  for f in "${WORKFLOWS[@]}"; do
+    case_ "runners and actions of ${f##*/}"
+    OUT=$(<"$f")
+    hasnt 'runs-on:.*(ubuntu|windows|macos)-'
+    eq "$(grep -E '^ *runs-on:' "$f")" "    runs-on: [self-hosted, doment-linux]" "runs-on"
+    count_is '^ *(- )?uses: ' "$(grep -Ec '^ *(- )?uses: actions/[a-z-]+@[0-9a-f]{40} # v[0-9]' <<<"$OUT")"
+    count_is '^ *(- )?uses: actions/checkout@' 2
+    count_is '^ *(- )?uses: actions/setup-dotnet@' 1
+  done
+}
+
+t_A9s() {
+  local f
+  for f in "${WORKFLOWS[@]}"; do
+    case_ "deploy key of ${f##*/}"
+    OUT=$(<"$f")
+    count_is 'secrets\.DARKRAISE_FRAMEWORK_DEPLOY_KEY' 1
+    OUT=$(step_with "$f" '^ *id: framework$')
+    count_is '^%%$' 1
+    count_is '^ *ssh-key: \$\{\{ secrets\.DARKRAISE_FRAMEWORK_DEPLOY_KEY \}\}$' 1
+    count_is '^ *GIT_LFS_SKIP_SMUDGE: 1$' 1
+    case_ "checkout steps of ${f##*/}"
+    OUT=$(step_with "$f" 'uses: actions/checkout@')
+    count_is '^%%$' 2
+    count_is '^ *persist-credentials: false$' 2
+    count_is '^ *lfs: false$' 2
+    case_ "token permissions of ${f##*/}"
+    eq "$(top_block "$f" permissions)" "  contents: read" "permissions block"
+    OUT=$(<"$f")
+    count_is '^ *permissions:' 1
+  done
+}
+
+t_A6s() {
+  local f
+  for f in "${WORKFLOWS[@]}"; do
+    case_ "DOMENT_CI_PIN_ON_MASTER in ${f##*/}"
+    OUT=$(step_with "$f" 'run: bash build/ci\.sh \$\{\{ matrix\.suite \}\}$')
+    count_is '^%%$' 1
+    eq "$(value_of DOMENT_CI_PIN_ON_MASTER "$OUT")" "$C5_PIN" "DOMENT_CI_PIN_ON_MASTER"
+  done
+}
+
+t_A12() {
+  local f
+  for f in "${WORKFLOWS[@]}"; do
+    case_ "concurrency of ${f##*/}"
+    OUT=$(top_block "$f" concurrency)
+    eq "$(value_of group "$OUT")" "$C5_GROUP" "group"
+    eq "$(value_of cancel-in-progress "$OUT")" "true" "cancel-in-progress"
+  done
+}
+
+t_A23() {
+  local f before
+  for f in "${WORKFLOWS[@]}"; do
+    case_ "steps before the framework checkout in ${f##*/}"
+    grep -Eq '^ *id: framework$' "$f" || note "no step with id framework"
+    before=$(steps "$f" | awk '/^ *id: framework$/ { exit } { print }')
+    # The pin step reads the pin file and names it in its own error annotation; neither runs a file from the tree.
+    OUT=$(grep -v '^ *- name: ' <<<"$before" | sed -e 's/\$(<build\/darkraise-framework\.pin)//g' \
+      -e 's/cat build\/darkraise-framework\.pin//g' -e 's/::error::build\/darkraise-framework\.pin does not hold//g')
+    hasnt '(^|[^A-Za-z0-9_.-])(build|tools|tests|src)/|(^|[^A-Za-z0-9_.])\./'
+    case_ "no build-server shutdown in ${f##*/}"
+    OUT=$(<"$f")
+    hasnt 'build-server +shutdown'
+  done
+}
+
 # ---------------------------------------------------------------------------
 
 declare -A DESC=(
@@ -258,11 +365,13 @@ declare -A DESC=(
   [A9]="verify finds a leftover deploy key" [A11]="verify names a missing runner package"
   [A18]="verify checks framework cleanliness, free space and LFS" [A19]="check runs the gate after a failed check.sh"
   [A25]="check.sh skips the build-server shutdown on CI" [usage]="ci.sh usage errors"
+  [A6s]="pin-on-master expression" [A7]="triggers and fork guard" [A8]="self-hosted runner, actions pinned to SHAs"
+  [A9s]="secret used once, read-only token" [A12]="concurrency cancels older branch runs" [A23]="no tree file runs before the key"
 )
 
 RESULT_FAIL=0
 RESULT_PASS=0
-for fn in $(declare -F | awk '{print $3}' | grep -E '^t_A[0-9]+$' | sort -t A -k2 -n) t_usage; do
+for fn in $(declare -F | awk '{print $3}' | grep -E '^t_A[0-9]+s?$' | sort -t A -k2 -n) t_usage; do
   n=${fn#t_}
   [[ -z $FILTER || $n =~ $FILTER ]] || continue
   FAILS=()
