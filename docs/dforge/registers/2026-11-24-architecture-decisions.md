@@ -14,7 +14,7 @@
 | 7 | gate_master_pin_file cannot tell the gate's own DOMENT006/DOMENT003 lines from the build's identical ones | docs/dforge/plans/2026-11-24-repository-build-nativeaot.md | A22 | done | - |
 | 8 | gate.sh writes the temporary framework-check project without XML-escaping the tree path (& or < in a path breaks it) | docs/dforge/plans/2026-11-24-repository-build-nativeaot.md | A23 | done | - |
 | 9 | The gate's plain-directory ancestry skip and the new git-failure die paths have no test | docs/dforge/plans/2026-11-24-repository-build-nativeaot.md | A24 | done | - |
-| 10 | Push and merge the framework branch docs/doment-framework-worktree (bd20326e) in darkraise-framework | - | - | open | - |
+| 10 | Push and merge the framework branch docs/doment-framework-worktree (bd20326e) in darkraise-framework | owner 2026-11-25 | - | done | merged into framework master as 0e8fa78e (local); owner pushes framework master |
 | 11 | tools/framework.sh and gate.sh call GNU timeout, which macOS lacks by default | - | - | deferred | Task 2 ruling: macOS runs none of these scripts through M6; a command -v timeout check is the later one-line fix |
 | 12 | One clean-tree definition across framework.sh sync and the MSBuild check for paths with spaces or non-ASCII characters | - | - | deferred | Task 2 ruling: both read git status -z identically; UTF-8 decoding applied in DomentGit.Run |
 | 13 | dotnet build 10.0.302 appends -consoleloggerparameters:Summary after -clp:NoSummary | - | - | deferred | handled in Task 1: run.sh and gate.sh replace the console logger; recorded as a gotcha |
