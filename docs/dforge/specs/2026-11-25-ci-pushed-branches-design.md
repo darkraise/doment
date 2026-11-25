@@ -53,9 +53,10 @@ Out of scope: Windows CI (M7 "Windows build and CI"), the network test bench (R1
 One workflow, `.github/workflows/ci.yml`, named `CI`:
 
 - `on: push` with `branches: ['**']`: every branch, no tag.
-- `on: pull_request` with `branches: [master]`. The job's `if:` runs it only when
-  `github.event_name == 'push'` or the pull request's head repository is `darkraise/doment`, so a fork's pull
-  request starts no job and its code never reaches a runner.
+- `on: pull_request` with `branches: [master]`. The job's `if:` is
+  `github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`, so a
+  fork's pull request starts no job and its code never reaches a runner, while push and dispatch runs start both
+  entries.
 - No `pull_request_target`, no `workflow_run`, no `schedule`. `workflow_dispatch` is allowed (it runs only for people
   with write access) so a run can be repeated by hand.
 - `permissions: contents: read` at the top level.
@@ -63,7 +64,8 @@ One workflow, `.github/workflows/ci.yml`, named `CI`:
   to a feature branch cancels its older run and master runs always finish.
 
 A same-repository branch with an open pull request gets two runs per push (the push and the pull request's merge
-commit). That is accepted: the pull request run checks the merged tree, the push run the branch.
+commit), four jobs in all. That is accepted: the pull request run checks the merged tree, the push run the branch. It
+is why the pool needs at least two concurrent runners (§3.5); queue time is measured on the first runs.
 
 ### 3.2 The job
 
@@ -75,18 +77,24 @@ so the two entries run as parallel jobs shown as `check` and `acceptance`. `runs
    annotation.
 3. `actions/checkout` of `darkraise/darkraise-framework` at the pin into `external/darkraise-framework`, with
    `ssh-key: ${{ secrets.DARKRAISE_FRAMEWORK_DEPLOY_KEY }}`, `fetch-depth: 0` (so `origin/master` is present for
-   DOMENT005), `lfs: false` and `persist-credentials: true` (so the gate's `git fetch origin` works). The secret is
-   referenced in this step only.
+   DOMENT005), `lfs: false` and `persist-credentials: false`, so the key is removed when the step ends and no later
+   step (the pushed branch's own build and test code included) can read it. The secret is referenced in this step
+   only. The gate needs no fetch of its own: the checkout already brought `refs/remotes/origin/master`.
 4. On failure of step 3, an `if: failure()` step prints
    `::error::cannot check out darkraise-framework at <pin>: push that framework commit to its origin, or check the DARKRAISE_FRAMEWORK_DEPLOY_KEY secret`.
-5. Toolchain check: `clang` on `PATH` and `zlib.h` present (zlib1g-dev); each missing one fails with
-   `::error::<package> is missing on the runner; add it to the ghr pool's managed packages`.
-6. `actions/setup-dotnet` with `global-json-file: global.json`. `DOTNET_INSTALL_DIR` is the runner's own when that
+5. Framework clean check: `git -C external/darkraise-framework status --porcelain` must print nothing; otherwise the
+   step fails with `::error::the framework checkout is not clean: <first path>`, so a strict-mode DOMENT001 on CI
+   comes with its cause.
+6. Runner check: `clang` on `PATH` and `zlib.h` present (zlib1g-dev); each missing one fails with
+   `::error::<package> is missing on the runner; add it to the ghr pool's managed packages`. Under 20 GB free in the
+   workspace fails with `::error::workspace has <g> GB free at <dir>, needs 20 GB`.
+7. `actions/setup-dotnet` with `global-json-file: global.json`. `DOTNET_INSTALL_DIR` is the runner's own when that
    directory exists and is writable, `$RUNNER_TEMP/dotnet` otherwise (the ghr tool cache is read-only to jobs).
-7. `dotnet tool restore`.
-8. The entry's commands, with `DOMENT_GATE_PIN_ON_MASTER=1` set when the run is a push to master or a pull request
-   into master:
-   - `check`: `build/check.sh`, then `build/gate.sh`.
+8. `dotnet tool restore`.
+9. The entry's commands:
+   - `check`: `build/check.sh`, then `build/gate.sh`; the gate runs even when `build/check.sh` failed, and the step
+     fails when either did. Only the gate call gets `DOMENT_GATE_NO_FETCH=1`, and `DOMENT_GATE_PIN_ON_MASTER=1` when
+     the run is a push to master or a pull request into master; no other command sees either variable.
    - `acceptance`: `tests/build/repository-build.acceptance.sh`, then
      `tests/build/repository-build-nativeaot.acceptance.sh` (its A25 runs `tests/build/run.sh` and
      `tests/build/architecture-decisions.acceptance.sh`). Each suite runs even when an earlier one failed; the step
@@ -108,8 +116,13 @@ on feature branches behave as today.
 
 - A17 takes `DOTNET_ROOT` from the `dotnet` on `PATH` (`readlink -f "$(command -v dotnet)"`'s directory, as
   `build/check.sh` does) instead of `/usr/local/share/dotnet`.
-- A20 diffs against a fixed base, the parent of the first commit of the repository-build-nativeaot plan, recorded as a
-  full SHA in the suite, instead of `merge-base HEAD master`, so it passes on master and on any branch.
+- A20 diffs a fixed range, from the parent of the repository-build-nativeaot plan's first commit to that plan's last
+  commit, both recorded as full SHAs in the suite, instead of `merge-base HEAD master`..HEAD. It then checks exactly
+  the rows that epic added, on master and on any branch, and a later epic's rows (M7's Windows-only platform rows
+  among them) never reach it.
+- Every `tests/build` runner (`run.sh`, `architecture-decisions.acceptance.sh`, `repository-build.acceptance.sh`,
+  `repository-build-nativeaot.acceptance.sh`) adds `DOMENT_GATE_PIN_ON_MASTER` to its `unset` line, so a value in the
+  caller's environment cannot change a case such as `run.sh`'s `gate_main_pin`.
 - The plan reruns both suites on this host after each fix; whatever else fails only on the runner is found by the
   first pushed run (see Riskiest assumption) and fixed the same way, without new skips.
 
@@ -117,8 +130,8 @@ on feature branches behave as today.
 
 Each is a one-time step done by the owner, or by the session with the owner's consent at the spec review:
 
-1. ghr: serve `darkraise/doment` with a pool labelled `doment-linux`, with `clang` and `zlib1g-dev` in its managed
-   apt packages.
+1. ghr: serve `darkraise/doment` with a pool labelled `doment-linux` of at least two concurrent runners, with
+   `clang` and `zlib1g-dev` in its managed apt packages.
 2. Deploy key: an ed25519 key pair; the public half added to `darkraise-framework` as a read-only deploy key, the
    private half stored as the doment Actions secret `DARKRAISE_FRAMEWORK_DEPLOY_KEY`.
 3. Pushes: verifying this epic needs pushes of a doment branch, and at finishing a push of doment master (54+
@@ -140,19 +153,46 @@ A5. [test, neg, high] With `DOMENT_GATE_PIN_ON_MASTER=1`, the gate fails with DO
 A6. [test, high] The workflow sets `DOMENT_GATE_PIN_ON_MASTER=1` exactly for a push to master and a pull request into master.
 A7. [test, neg, high] No workflow declares `pull_request_target`, and a pull request whose head repository is not `darkraise/doment` starts no job.
 A8. [test, neg, high] No job's `runs-on` names a GitHub-hosted label (`ubuntu-*`, `windows-*`, `macos-*`).
-A9. [test, neg, high] The secret `DARKRAISE_FRAMEWORK_DEPLOY_KEY` is referenced by the framework checkout step only, and the workflow grants `contents: read` and nothing else.
+A9. [test, neg, high] The secret `DARKRAISE_FRAMEWORK_DEPLOY_KEY` is referenced by the framework checkout step only, the key is not readable by any later step, and the workflow grants `contents: read` and nothing else.
 A10. [test, high] When the pin cannot be checked out from the framework's remote, the job fails with an error annotation naming the pin and saying to push the framework commit or check the secret.
 A11. [test, high] When `clang` or `zlib.h` is missing on the runner, the job fails before any build with an error annotation naming the missing package.
 A12. [test, high] A newer push to the same non-master branch cancels that branch's run in progress; a run on master is never cancelled.
-A13. [test, high] A17 and A20 pass when the suite runs from master on this host, and A17 passes with an SDK that is not under `/usr/local/share/dotnet`.
+A13. [test, high] Cases A17 and A20 of `tests/build/repository-build-nativeaot.acceptance.sh` pass when that suite runs from master on this host, and its case A17 passes with an SDK that is not under `/usr/local/share/dotnet`.
 A14. [test, high] The `CI` run of the doment master push made at finishing passes both jobs.
 A15. [demo, high] `docs/architecture.md` records the workflow, its triggers and fork rule, the runner label, the secret name, the toolchain packages and `DOMENT_GATE_PIN_ON_MASTER`.
+A16. [test, neg, high] Only the `check` entry's gate call sees `DOMENT_GATE_PIN_ON_MASTER`, and every `tests/build` runner unsets it, so the acceptance job passes on a master push.
+A17. [test, high] A `workflow_dispatch` run on a branch starts both entries.
+A18. [test, high] A framework checkout that is not clean, or a workspace under 20 GB free, fails the job before any build with an error annotation naming the dirty path or the free space found.
+A19. [test, high] In the `check` entry the gate runs even when `build/check.sh` failed, and the job fails when either did.
 
 ## Riskiest assumption
 
-That the build and the acceptance suites pass on a fresh single-use ghr runner. They have only ever run on this
+Three parts, in the order the plan checks them:
+
+1. **The pool picks up the jobs.** The `doment-linux` pool is new owner setup, and the framework's own pool had run no
+   job by 2026-11-25 (`darkraise-framework/docs/dforge/specs/2026-11-25-ci-on-ghr-design.md`). A job no runner serves
+   stays queued with no log line. The plan's first pushed run is a probe job on `[self-hosted, doment-linux]` that
+   prints the host and runner name; still queued after 15 minutes, it is cancelled and the owner is asked.
+2. **The framework checkout is clean under strict mode.** Here the framework is a worktree made with LFS smudging
+   off (`tools/framework.sh`); on the runner it is an `actions/checkout` clone, and a system-level LFS filter could
+   leave paths modified. The clean check (§3.2 step 5) names the cause if so.
+3. **The build and the acceptance suites pass on a fresh single-use ghr runner.** They have only ever run on this
 development host, with its NuGet package folder, its SDK under `/usr/local/share/dotnet` (A17 already depends on that)
 and a long-lived framework worktree.
 
-unverified — the plan's first task verifies it: it pushes the workflow on a feature branch before the other tasks,
+All three: unverified — the plan's first task verifies it: it pushes the workflow on a feature branch before the other tasks,
 and what the first run shows is fixed before anything is built on it.
+
+## Critic findings
+
+Round 1 (dforge:judge-opus, 2026-11-25): 0 Blocker, 2 High, 5 Medium, 2 Nit; every finding fixed in the spec.
+
+- [High, fixed] `DOMENT_GATE_PIN_ON_MASTER` reached the acceptance suites and would break `run.sh`'s `gate_main_pin` on master: set on the `check` gate call only, unset by every `tests/build` runner (§3.2 step 9, §3.4, A16).
+- [High, fixed] A fixed A20 base diffed to HEAD would check later epics' rows, including M7's Windows-only ones: A20 diffs a fixed range (§3.4).
+- [Medium, fixed] The job's `if:` skipped `workflow_dispatch`: condition rewritten (§3.1, A17).
+- [Medium, fixed] `persist-credentials: true` left the deploy key readable by later steps: `false`, with `DOMENT_GATE_NO_FETCH=1` on the gate call (§3.2 steps 3 and 9, A9).
+- [Medium, fixed] Pool pickup was missing from the riskiest assumption: added as part 1, with a probe job and a 15-minute limit.
+- [Medium, fixed] Pool size unstated: at least two concurrent runners (§3.5), queue time measured (§3.1).
+- [Medium, fixed] Framework cleanliness under strict mode unverified: clean check step (§3.2 step 5, A18) and riskiest assumption part 2.
+- [Nit, fixed] Whether the gate runs after a failed `build/check.sh`: it does (§3.2 step 9, A19).
+- [Nit, fixed] No free-space check: 20 GB minimum (§3.2 step 6, A18).
