@@ -739,7 +739,7 @@ t_A23() {
   case_ "path with & < ' and a space"
   skip_case "refused under amendment A5; register docs/dforge/registers/2026-11-24-repository-build-nativeaot.md row 7"
   case_ "path with ' and a space only"
-  ENVV=(DOMENT_QA=1 "DARKRAISE_FRAMEWORK_PATH=$FRAMEWORK")
+  ENVV=(DOMENT_QA=1 DOMENT_GATE_NO_FETCH=1 "DARKRAISE_FRAMEWORK_PATH=$FRAMEWORK")
   mkrepo "$OUTSIDE/q' y" master || die_setup "mkrepo"
   run "$REPO_ROOT" 900 bash build/gate.sh "$OUTSIDE/q' y"
   rc_is 0
