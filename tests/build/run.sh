@@ -1629,8 +1629,21 @@ CASES+=(portable_target_framework)
 case_portable_target_framework() {
   local root=$FIXTURE_RUN/portable_target_framework
   fixture_project portable_target_framework src/WinOnly net10.0-windows
-  # The WindowsDesktop reference pack comes from the user's package folder; the run's feed is empty.
-  local fallback="-p:RestoreAdditionalProjectFallbackFolders=$HOME/.nuget/packages"
+  # The run's feed lacks the WindowsDesktop reference pack, and a fresh CI runner's package folder lacks it too,
+  # so a stand-in project restores it from nuget.org into a folder of this run.
+  local refs=$T/windows-ref
+  write_file "$refs/WindowsRef.csproj" <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+</Project>
+XML
+  OUT=$(timeout 600 dotnet restore "$refs/WindowsRef.csproj" -nologo \
+    -p:RestoreSources=https://api.nuget.org/v3/index.json "-p:RestorePackagesPath=$refs/packages" 2>&1) ||
+    fail "cannot restore the WindowsDesktop reference pack from nuget.org; output: $(tail -n 20 <<<"$OUT")"
+  local fallback="-p:RestoreAdditionalProjectFallbackFolders=$refs/packages"
   dn build "$root/src/WinOnly" "$fallback"
   expect_rc 1
   expect_count 'error DOMENT' 1
