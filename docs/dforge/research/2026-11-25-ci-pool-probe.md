@@ -39,3 +39,18 @@ Task 1 of the CI for pushed branches plan: the throwaway `probe` job of `.github
 Until both are present, `build/ci.sh verify` (Task 4) fails every run with the missing-package annotation. The probe
 did not look for `zlib.h` (package `zlib1g-dev`), which `verify` also requires; Task 5's first run shows whether it is
 present.
+
+## Job durations (Task 5)
+
+First green run: https://github.com/darkraise/doment/actions/runs/45735004164 (commit 57af03b, 2026-11-26), host
+`secondary-25-10-2028`. Queue time is `created_at` to `started_at`; run time is `started_at` to `completed_at`
+(`gh api repos/darkraise/doment/actions/runs/45735004164/attempts/<n>/jobs`).
+
+| Job | Attempt | Runner | Queued | Ran |
+|---|---|---|---|---|
+| `acceptance` | 1 | `ghr-doment-69cabd` | 27 s (01:19:43 to 01:20:10 UTC) | 62 min 55 s (to 02:23:05 UTC) |
+| `check` | 3 | `ghr-doment-8d40f6` | 20 s (14:28:27 to 14:28:47 UTC) | 11 min 19 s (to 14:40:06 UTC) |
+
+The `check` job's attempts 1 and 2 failed `build/ci.sh verify` with `file is missing on the runner` (runners
+`ghr-doment-826a16` at 01:20:19 and `ghr-doment-c14484`), while attempt 1's `acceptance` verify on the same host found
+`file` at 01:20:28; attempt 3 ran after the owner fixed `file` on the host (asked to make it a managed package).
