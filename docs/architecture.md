@@ -235,9 +235,11 @@ that turns them into errors. `DomentPlatform`, `DomentSimulation` and `DomentFor
 against. Its first value was the framework remote's master on 2026-11-24, `e3cb121d83147eef363559d6f6bd4becda4b9e89`.
 
 The framework's standing rule is that commits stay local and the owner pushes. A doment feature branch may therefore
-pin a framework commit that exists only on this machine. CI, and the gate when it runs on doment's main branch,
-require the pin to be an ancestor of the framework's remote master (DOMENT005). With `DOMENT_GATE_PIN_ON_MASTER=1`
-the gate applies that check on any branch or a detached HEAD.
+pin a framework commit that exists only on this machine. On doment's master and on pull requests into it, CI
+requires the pin to be an ancestor of the framework's remote master (DOMENT005), as the gate does when it runs on
+doment's main branch; on any other branch CI requires only that the pin exists on the framework's remote, because its
+framework checkout fetches it from there. With `DOMENT_GATE_PIN_ON_MASTER=1` the gate applies the ancestor check on
+any branch or a detached HEAD.
 
 ### `tools/framework.sh`
 
@@ -305,9 +307,18 @@ contributions: the audio codec (M3), the video surface control (M7), the termina
    unpushed framework commit can stop building once that framework branch is rewritten or deleted. Only commits whose
    pin is on framework master are guaranteed to stay buildable.
 2. **The framework repository is private** and doment's is public, so only someone with framework access can build
-   doment, and CI needs a read-only credential for it.
+   doment, and CI reads it through a read-only deploy key on the framework repository (`doment CI (read-only)`, held
+   in doment's secret `DARKRAISE_FRAMEWORK_DEPLOY_KEY`).
 3. **Removing a doment worktree without `release` discards uncommitted framework work.** The framework worktree is
    ignored by doment's git, so removing a doment worktree any other way deletes it without a prompt.
+4. **Write access to doment implies read access to the framework.** Anyone who can push a doment branch can change
+   `ci.yml` to print the deploy key. `persist-credentials: false` keeps the key from the build, restore and test code
+   of a branch that leaves the workflow alone, not from the workflow itself. Today only the owner has write access.
+5. **No merge queue while ghr serves doment.** ghr does not refuse `merge_group` jobs, and a merge queue runs a fork
+   pull request's code as base-repository code.
+6. **The key is readable on the runner host during the framework checkout.** It is in that step's process
+   environment, which another job running on the ghr host as the same user can read. That is inside ghr's trust
+   domain: every repository it serves is the owner's.
 
 ## Third-party register and gate
 
@@ -398,6 +409,8 @@ checkout and on stand-in trees under `artifacts/acceptance/`, with the user's no
   every shell on the machine now resolves first; apt's 10.0.302 stays installed (its runtime 10.0.10 fails the
   NativeAOT restore on GHSA-p3jp-9v83-76w9). Undo: remove `/usr/local/share/dotnet` and the link.
 - clang comes from apt (`apt remove clang` undoes it); no build file sets `CppCompilerAndLinker`.
+- On a CI runner the SDK comes from `actions/setup-dotnet` (from `global.json`, installed under `$RUNNER_TEMP/dotnet`)
+  and clang from ghr's managed packages (see CI).
 - `docs/dforge/research/2026-11-24-build-probes.md` records the probes the build mechanisms rest on.
 
 ### Solution
@@ -460,19 +473,75 @@ runs each call in a process group of its own under a timeout (600 s, 1200 s for 
 prints `check: <step> ok` or `check: <step> failed` with indented cause lines, and last
 `check: <n> steps run, <f> failed`; it exits 0, 1 on a failure, 2 on an unknown step.
 
+## CI
+
+### The workflow
+
+`.github/workflows/ci.yml`, workflow `CI`, has one job, `build`, with a matrix of two entries, `check` and
+`acceptance` (`fail-fast: false`).
+
+- **Triggers:** a push of any branch (no tags), a pull request into master, and `workflow_dispatch`; never
+  `pull_request_target`, `workflow_run`, `issue_comment`, `merge_group` or `schedule`.
+- **Token:** `permissions: contents: read`, nothing else.
+- **Concurrency:** a newer push to the same branch cancels that branch's run in progress; every master run has a group
+  of its own, so no master run is cancelled.
+- **Timeouts:** 30 minutes for `check` and 130 for `acceptance`, twice the first green run's durations (11 and 63
+  minutes, 2026-11-26) rounded up; `docs/dforge/research/2026-11-25-ci-pool-probe.md` records them.
+- **Steps:** check out doment (`fetch-depth: 0`, `lfs: false`, `persist-credentials: false`); read the pin with bash
+  alone, check that it is one 40-character hash and that `ssh` is present; check out the framework at the pin into
+  `external/darkraise-framework` with the deploy key (same flags, plus `GIT_LFS_SKIP_SMUDGE=1`), with an annotation
+  naming the pin when that fails; `build/ci.sh verify`; `actions/setup-dotnet` from `global.json` into
+  `$RUNNER_TEMP/dotnet`; `dotnet --version`; `dotnet tool restore`, under `flock` on
+  `$HOME/.nuget/doment-tool-restore.lock`, because two jobs restoring the same tool into the shared package folder at
+  once fail; then `build/ci.sh <entry>`.
+- **Invariants:** no step before the framework checkout runs a file from the checked-out tree, since such a file could
+  write `GITHUB_ENV` and capture the key; every `uses:` is an `actions/*` action at a full commit SHA (the repository
+  also requires SHA pinning); the job environment disables node reuse, the MSBuild server and the shared compiler, and
+  no step runs `dotnet build-server shutdown`, which would stop other jobs' servers on the shared runner user
+  (`build/check.sh` skips its own when `GITHUB_ACTIONS=true`).
+
+### Fork controls
+
+- **The job condition** runs a `pull_request` job only when the head repository is doment itself, so a fork's pull
+  request that leaves the workflow alone shows as skipped. It does not stop a fork that edits the workflow.
+- **ghr's job-started hook** ends the runner's worker for any job whose event comes from a fork.
+- **The repository's approval setting** requires the owner's approval before any external contributor's workflow
+  runs (`fork-pr-contributor-approval`: `all_external_contributors`).
+
+### Runners
+
+Jobs run only on `[self-hosted, doment-linux]`, a ghr pool on the owner's host; no workflow names a GitHub-hosted
+label. ghr registers a runner only while a job is queued. Every runner is the user `ghrunner` with one `HOME`, so jobs
+share `~/.nuget/packages`. The jobs need `clang`, `zlib1g-dev`, `jq`, `file`, `procps` and `openssh-client`, which come
+from ghr's managed packages (a host-wide list, `ghr package install <name>`); `build/ci.sh verify` names any that is
+missing.
+
+### The secret
+
+`DARKRAISE_FRAMEWORK_DEPLOY_KEY` holds the private half of the read-only deploy key `doment CI (read-only)` on
+`darkraise/darkraise-framework`. Only the framework checkout step references it, and `build/ci.sh verify` checks that
+the checkout left no `core.sshCommand` and no private key under `RUNNER_TEMP`.
+
+### `build/ci.sh`
+
+`build/ci.sh verify|check|acceptance` holds everything after the key's step, so each failure path is tested locally
+with stand-ins (`tests/build/ci-pushed-branches.acceptance.sh`).
+
+- `verify` checks that the deploy key is gone, that the framework checkout is clean and holds no LFS objects, that
+  the runner has the packages above, and that the workspace has at least 20 GB free; it prints every failure.
+- `check` runs `build/check.sh`, then always `build/gate.sh`, and fails when either failed.
+- `acceptance` runs `tests/build/repository-build.acceptance.sh`, `tests/build/repository-build-nativeaot.acceptance.sh`
+  and `tests/build/ci-pushed-branches.acceptance.sh`, each whatever the previous result.
+
+### `DOMENT_GATE_PIN_ON_MASTER`
+
+The workflow sets `DOMENT_CI_PIN_ON_MASTER=1` for the `check` entry of a push to master or a pull request into master,
+and `0` otherwise. `build/ci.sh check` passes it to the gate call alone as `DOMENT_GATE_PIN_ON_MASTER`, with
+`DOMENT_GATE_NO_FETCH=1`, after printing `ci: gate DOMENT_GATE_PIN_ON_MASTER=<value>`: a pull request's checkout is a
+detached merge commit, which the gate's own master-or-main rule never matches. Every `tests/build` runner unsets the
+variable.
+
 ## Rules handed to later epics
-
-### CI for pushed branches
-
-- Install the SDK from `global.json` (`actions/setup-dotnet` with `global-json-file`), have clang on the runner, run
-  `dotnet tool restore`, then `build/check.sh` and `build/gate.sh`.
-
-- Check out the framework at the pin into `external/darkraise-framework` with a read-only credential for the private
-  repository, with LFS downloads skipped.
-- Build with `FrameworkPinStrict=true`.
-- On the main branch and on pull requests into it, fail when the pin is not an ancestor of the framework's remote
-  master.
-- Never run on `pull_request_target`.
 
 ### Gates declared
 
