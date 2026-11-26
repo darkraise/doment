@@ -269,7 +269,8 @@ steps() { # steps <file>: every step's lines, each step ended by a line `%%`
     END { if (n) print "%%" }' "$1"
 }
 step_with() { # step_with <file> <line regex>: the steps holding a line that matches, each ended by `%%`
-  steps "$1" | awk -v re="$2" '$0 == "%%" { if (m) printf "%s%%%%\n", b; b = ""; m = 0; next } { b = b $0 "\n"; if ($0 ~ re) m = 1 }'
+  # The regex goes through ENVIRON: gawk applies escape processing to -v values, turning \$ and \{ into $ and {.
+  steps "$1" | STEP_RE="$2" awk '$0 == "%%" { if (m) printf "%s%%%%\n", b; b = ""; m = 0; next } { b = b $0 "\n"; if ($0 ~ ENVIRON["STEP_RE"]) m = 1 }'
 }
 value_of() { sed -nE "s/^ *(- )?$1: //p" <<<"$2"; } # value_of <key> <text>: the values of that key
 
