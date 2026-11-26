@@ -272,6 +272,12 @@ step_with() { # step_with <file> <line regex>: the steps holding a line that mat
   # The regex goes through ENVIRON: gawk applies escape processing to -v values, turning \$ and \{ into $ and {.
   steps "$1" | STEP_RE="$2" awk '$0 == "%%" { if (m) printf "%s%%%%\n", b; b = ""; m = 0; next } { b = b $0 "\n"; if ($0 ~ ENVIRON["STEP_RE"]) m = 1 }'
 }
+run_lines() { # run_lines: from stdin step text, the lines of every run: script
+  awk 'match($0, /^ */) && $0 ~ /^ *(- )?run:/ { k = RLENGTH; r = $0; sub(/^ *(- )?run: */, "", r)
+      if (r == "|" || r == ">") { inrun = 1 } else { inrun = 0; print r }; next }
+    inrun && match($0, /^ */) && RLENGTH > k { print; next }
+    { inrun = 0 }'
+}
 value_of() { sed -nE "s/^ *(- )?$1: //p" <<<"$2"; } # value_of <key> <text>: the values of that key
 
 t_A7() {
@@ -343,6 +349,15 @@ t_A12() {
   done
 }
 
+t_A16() {
+  local f
+  for f in "$REPO_ROOT"/tests/build/run.sh "$REPO_ROOT"/tests/build/*.acceptance.sh; do
+    case_ "unset line of ${f##*/}"
+    OUT=$(sed -n '/^unset /,/[^\\]$/p' "$f")
+    has '(^|[[:space:]])DOMENT_GATE_PIN_ON_MASTER([[:space:]]|\\|$)'
+  done
+}
+
 t_A23() {
   local f before
   for f in "${WORKFLOWS[@]}"; do
@@ -353,6 +368,17 @@ t_A23() {
     OUT=$(grep -v '^ *- name: ' <<<"$before" | sed -e 's/\$(<build\/darkraise-framework\.pin)//g' \
       -e 's/cat build\/darkraise-framework\.pin//g' -e 's/::error::build\/darkraise-framework\.pin does not hold//g')
     hasnt '(^|[^A-Za-z0-9_.-])(build|tools|tests|src)/|(^|[^A-Za-z0-9_.])\./'
+    # A blocklist of paths misses `make` or `bash ci/x.sh`, so every command of these run: scripts must be a builtin.
+    local cmds
+    cmds=$(run_lines <<<"$before" | sed -e 's/\$(<build\/darkraise-framework\.pin)//g' \
+      -e 's/::error::build\/darkraise-framework\.pin does not hold//g' -e 's#/dev/null##g')
+    OUT=$cmds
+    hasnt '/'
+    hasnt '\$\(|`'
+    OUT=$(awk '{ l = $0; gsub(/"[^"]*"/, "\"\"", l); n = split(l, p, /;|&&|\|\||\|/)
+      for (i = 1; i <= n; i++) { c = p[i]; sub(/^[ \t]+/, "", c); while (sub(/^(if|then|else|!)( +|$)/, "", c)) {}
+        if (c != "" && c !~ /^(echo|exit|fi|\[\[|command -v)( |$)/ && c !~ /^[A-Za-z_][A-Za-z0-9_]*=/) print c } }' <<<"$cmds")
+    eq "$OUT" "" "commands that are not builtins"
     case_ "no build-server shutdown in ${f##*/}"
     OUT=$(<"$f")
     hasnt 'build-server +shutdown'
@@ -367,7 +393,7 @@ declare -A DESC=(
   [A18]="verify checks framework cleanliness, free space and LFS" [A19]="check runs the gate after a failed check.sh"
   [A25]="check.sh skips the build-server shutdown on CI" [usage]="ci.sh usage errors"
   [A6s]="pin-on-master expression" [A7]="triggers and fork guard" [A8]="self-hosted runner, actions pinned to SHAs"
-  [A9s]="secret used once, read-only token" [A12]="concurrency cancels older branch runs" [A23]="no tree file runs before the key"
+  [A9s]="secret used once, read-only token" [A12]="concurrency cancels older branch runs" [A16]="every tests/build runner unsets the pin switch" [A23]="no tree file runs before the key"
 )
 
 RESULT_FAIL=0
