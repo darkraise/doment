@@ -312,8 +312,11 @@ contributions: the audio codec (M3), the video surface control (M7), the termina
 3. **Removing a doment worktree without `release` discards uncommitted framework work.** The framework worktree is
    ignored by doment's git, so removing a doment worktree any other way deletes it without a prompt.
 4. **Write access to doment implies read access to the framework.** Anyone who can push a doment branch can change
-   `ci.yml` to print the deploy key. `persist-credentials: false` keeps the key from the build, restore and test code
-   of a branch that leaves the workflow alone, not from the workflow itself. Today only the owner has write access.
+   `ci.yml` to print the deploy key. Leaving the workflow alone is no barrier either: every ghr runner is one user
+   with one persistent `HOME`, so a branch's build, restore or test code can leave a git hook (through `~/.gitconfig`)
+   or an `~/.ssh/config` entry that runs during a later job's framework checkout, while the key is present.
+   `persist-credentials: false` only removes the key once the checkout step ends. Today only the owner has write
+   access.
 5. **No merge queue while ghr serves doment.** ghr does not refuse `merge_group` jobs, and a merge queue runs a fork
    pull request's code as base-repository code.
 6. **The key is readable on the runner host during the framework checkout.** It is in that step's process
@@ -512,9 +515,9 @@ prints `check: <step> ok` or `check: <step> failed` with indented cause lines, a
 
 Jobs run only on `[self-hosted, doment-linux]`, a ghr pool on the owner's host; no workflow names a GitHub-hosted
 label. ghr registers a runner only while a job is queued. Every runner is the user `ghrunner` with one `HOME`, so jobs
-share `~/.nuget/packages`. The jobs need `clang`, `zlib1g-dev`, `jq`, `file`, `procps` and `openssh-client`, which come
-from ghr's managed packages (a host-wide list, `ghr package install <name>`); `build/ci.sh verify` names any that is
-missing.
+share `~/.nuget/packages`. The jobs need `clang`, `zlib1g-dev`, `jq`, `file`, `procps`, `util-linux` (`flock`) and
+`openssh-client`, which come from ghr's managed packages (a host-wide list, `ghr package install <name>`);
+`build/ci.sh verify` names any that is missing.
 
 ### The secret
 

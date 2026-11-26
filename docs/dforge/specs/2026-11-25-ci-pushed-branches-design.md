@@ -206,8 +206,10 @@ Each is a one-time step done by the owner, or by the session with the owner's co
 ### 3.7 Limits
 
 - Write access to doment implies read access to the private framework: anyone who can push a branch can change
-  `ci.yml` to print the secret. `persist-credentials: false` keeps the key from build, restore and test code of a
-  branch that leaves the workflow alone, not from the workflow itself. Today only the owner has write access.
+  `ci.yml` to print the secret. Leaving the workflow alone is no barrier either: every ghr runner is one user with one
+  persistent `HOME`, so a branch's build, restore or test code can leave a git hook (through `~/.gitconfig`) or an
+  `~/.ssh/config` entry that runs during a later job's framework checkout, while the key is present.
+  `persist-credentials: false` only removes the key once the checkout step ends. Today only the owner has write access.
 - doment has no merge queue and must not get one while ghr serves it: ghr does not refuse `merge_group` jobs, and a
   merge queue runs a fork pull request's code as base-repository code.
 - During the framework checkout the key is in that step's process environment, which another job running on the ghr
