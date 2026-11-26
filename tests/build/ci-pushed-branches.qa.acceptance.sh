@@ -497,7 +497,7 @@ make_clone() {
 }
 
 gate_in_clone() { # gate_in_clone [VAR=value...]: the gate on the clone, offline
-  OUT=$(cd "$CLONE" && env DOMENT_GATE_NO_FETCH=1 "$@" timeout -k 10 1500 bash build/gate.sh "$CLONE" 2>&1) && RC=0 || RC=$?
+  OUT=$(cd "$CLONE" && env DOMENT_GATE_NO_FETCH=1 "$@" timeout -k 10 1500 bash "$REPO_ROOT/build/gate.sh" "$CLONE" 2>&1) && RC=0 || RC=$?
 }
 
 t_A5() {
