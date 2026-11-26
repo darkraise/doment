@@ -75,7 +75,7 @@ line_is() { grep -Fxq -- "$1" <<<"$OUT" || note "no output line is '$1'; output:
 
 CI_STUBS=(build/check.sh build/gate.sh tests/build/repository-build.acceptance.sh
   tests/build/repository-build-nativeaot.acceptance.sh tests/build/ci-pushed-branches.acceptance.sh)
-CI_TOOLS=(clang jq file ps pgrep)
+CI_TOOLS=(clang jq file ps pgrep flock)
 
 # ci_setup <name>: a stand-in tree $TREE holding a copy of build/ci.sh and stubs of the scripts it runs, a clean
 # stand-in framework at $TREE/fw, a directory of the system tools ci.sh may call ($TREE/sys) and one of stub tools
@@ -174,12 +174,12 @@ t_A11() {
   ci_setup a11
   local t pkg
   for t in "${CI_TOOLS[@]}" zlib.h; do
-    case $t in ps | pgrep) pkg=procps ;; zlib.h) pkg=zlib1g-dev ;; *) pkg=$t ;; esac
+    case $t in ps | pgrep) pkg=procps ;; flock) pkg=util-linux ;; zlib.h) pkg=zlib1g-dev ;; *) pkg=$t ;; esac
     case_ "$t missing"
     if [[ $t == zlib.h ]]; then rm "$TREE/zlib/zlib.h"; else mv "$TREE/stub/$t" "$TREE/$t.off"; fi
     ci verify
     rc_is 1
-    line_is "::error::$pkg is missing on the runner; add it to the ghr pool's managed packages"
+    line_is "::error::$pkg is missing on the runner; add it to ghr's managed packages on the runner host"
     count_is '^::error::' 1
     if [[ $t == zlib.h ]]; then : > "$TREE/zlib/zlib.h"; else mv "$TREE/$t.off" "$TREE/stub/$t"; fi
   done

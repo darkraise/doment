@@ -53,7 +53,7 @@ jobs:
           fi
           echo "pin=$pin" >> "$GITHUB_OUTPUT"
           if ! command -v ssh > /dev/null 2>&1; then
-            echo "::error::openssh-client is missing on the runner; add it to the ghr pool's managed packages"
+            echo "::error::openssh-client is missing on the runner; add it to ghr's managed packages on the runner host"
             exit 1
           fi
 

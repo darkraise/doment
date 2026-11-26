@@ -642,7 +642,7 @@ t_A11() {
   mkdir -p "$bin" "$S/a11zlib"
   : > "$S/a11zlib/zlib.h"
   for c in git grep find df awk dirname sed cat tr head sort mktemp uname; do ln -sf "$(command -v "$c")" "$bin/$c"; done
-  for c in clang jq file ps pgrep; do printf '#!/bin/sh\nexit 0\n' > "$bin/$c"; chmod +x "$bin/$c"; done
+  for c in clang jq file ps pgrep flock; do printf '#!/bin/sh\nexit 0\n' > "$bin/$c"; chmod +x "$bin/$c"; done
   local bash_bin timeout_bin
   bash_bin=$(command -v bash)
   timeout_bin=$(command -v timeout)
@@ -654,7 +654,7 @@ t_A11() {
   case_ "all tools present"
   vrun "$S/a11zlib"
   rc_is 0
-  for pkg in clang:clang jq:jq file:file ps:procps pgrep:procps; do
+  for pkg in clang:clang jq:jq file:file ps:procps pgrep:procps flock:util-linux; do
     case_ "${pkg%%:*} missing"
     mv "$bin/${pkg%%:*}" "$bin/${pkg%%:*}.off"
     vrun "$S/a11zlib"

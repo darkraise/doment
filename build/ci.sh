@@ -69,16 +69,16 @@ verify() {
   fi
 
   local tool pkg
-  for tool in clang:clang jq:jq file:file ps:procps pgrep:procps; do
+  for tool in clang:clang jq:jq file:file ps:procps pgrep:procps flock:util-linux; do
     pkg=${tool#*:}
     tool=${tool%%:*}
     if ! command -v "$tool" > /dev/null 2>&1; then
-      echo "::error::$pkg is missing on the runner; add it to the ghr pool's managed packages"
+      echo "::error::$pkg is missing on the runner; add it to ghr's managed packages on the runner host"
       failed=1
     fi
   done
   if [[ ! -f $zlib/zlib.h ]]; then
-    echo "::error::zlib1g-dev is missing on the runner; add it to the ghr pool's managed packages"
+    echo "::error::zlib1g-dev is missing on the runner; add it to ghr's managed packages on the runner host"
     failed=1
   fi
 
