@@ -275,6 +275,7 @@ step_with() { # step_with <file> <line regex>: the steps holding a line that mat
 run_lines() { # run_lines: from stdin step text, the lines of every run: script
   awk 'match($0, /^ */) && $0 ~ /^ *(- )?run:/ { k = RLENGTH; r = $0; sub(/^ *(- )?run: */, "", r)
       if (r == "|" || r == ">") { inrun = 1 } else { inrun = 0; print r }; next }
+    inrun && /^[ \t]*$/ { next }
     inrun && match($0, /^ */) && RLENGTH > k { print; next }
     { inrun = 0 }'
 }
@@ -379,6 +380,12 @@ t_A23() {
       for (i = 1; i <= n; i++) { c = p[i]; sub(/^[ \t]+/, "", c); while (sub(/^(if|then|else|!)( +|$)/, "", c)) {}
         if (c != "" && c !~ /^(echo|exit|fi|\[\[|command -v)( |$)/ && c !~ /^[A-Za-z_][A-Za-z0-9_]*=/) print c } }' <<<"$cmds")
     eq "$OUT" "" "commands that are not builtins"
+    # A shell: key, BASH_ENV, ENV or a defaults: block can run a tree file without any run: command naming it.
+    OUT=$(awk '/^ *id: framework$/ { exit } { print }' "$f")
+    hasnt '^ *(- )?shell:'
+    OUT=$(<"$f")
+    hasnt '^ *(- )?(BASH_ENV|ENV):'
+    hasnt '^ *defaults:'
     case_ "no build-server shutdown in ${f##*/}"
     OUT=$(<"$f")
     hasnt 'build-server +shutdown'
