@@ -24,7 +24,7 @@ jobs:
       matrix:
         suite: [check, acceptance]
     runs-on: [self-hosted, doment-linux]
-    timeout-minutes: ${{ matrix.suite == 'check' && 60 || 180 }}
+    timeout-minutes: ${{ matrix.suite == 'check' && 30 || 130 }}
     env:
       MSBUILDDISABLENODEREUSE: 1
       DOTNET_CLI_USE_MSBUILD_SERVER: 0
