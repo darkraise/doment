@@ -146,9 +146,9 @@ on bad usage. Inputs a test can replace: `PATH` (for the tools), `DOMENT_CI_ZLIB
   - the framework is clean by the build's definition (`git status --porcelain=v1 -z --ignored=matching
     --untracked-files=all`, ignoring only `bin`, `obj`, `.vs`, `.idea`, as `build/Doment.BuildChecks.cs` does),
     else `::error::the framework checkout is not clean: <first path>`;
-  - the tools: `clang`, `zlib.h` under `DOMENT_CI_ZLIB_INCLUDE`, `jq`, `file`, `ps`, `pgrep`, each missing one failing
-    with `::error::<package> is missing on the runner; add it to the ghr pool's managed packages` (packages `clang`,
-    `zlib1g-dev`, `jq`, `file`, `procps`);
+  - the tools: `clang`, `zlib.h` under `DOMENT_CI_ZLIB_INCLUDE`, `jq`, `file`, `ps`, `pgrep`, `flock`, each missing one
+    failing with `::error::<package> is missing on the runner; add it to ghr's managed packages on the runner host`
+    (packages `clang`, `zlib1g-dev`, `jq`, `file`, `procps`, `util-linux`);
   - free space in the workspace at least `DOMENT_CI_MIN_FREE_GB`, else
     `::error::workspace has <g> GB free at <dir>, needs <n> GB`.
 - `check`: runs `build/check.sh`, then `build/gate.sh` even when `build/check.sh` failed; prints
@@ -188,7 +188,7 @@ main only), so local runs on feature branches behave as today.
 Each is a one-time step done by the owner, or by the session with the owner's consent at the spec review:
 
 1. ghr: serve `darkraise/doment` with `allow_public` set, in a pool labelled `doment-linux` of at least two concurrent
-   runners, with `clang`, `zlib1g-dev`, `jq`, `file`, `procps` and `openssh-client` in its managed apt packages.
+   runners, with `clang`, `zlib1g-dev`, `jq`, `file`, `procps`, `util-linux` and `openssh-client` in its managed apt packages.
 2. Deploy key: an ed25519 key pair generated into a temporary directory; the public half added to
    `darkraise-framework` as a read-only deploy key, the private half piped into
    `gh secret set DARKRAISE_FRAMEWORK_DEPLOY_KEY -R darkraise/doment` and then deleted, so it is kept nowhere else.
